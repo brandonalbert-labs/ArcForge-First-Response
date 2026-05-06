@@ -1,0 +1,12 @@
+# Generated health check reports
+reports/*.txt
+
+# Keep reports folder in repo
+!reports/.gitkeep
+
+# PowerShell temporary files
+*.tmp
+*.log
+
+# VS Code workspace settings
+.vscode/
