@@ -1,9 +1,27 @@
 # ArcForge Studio IT Toolkit
-# Workstation Health Check v0.2
+# Workstation Health Check v0.3
 
 $ReportDate = Get-Date
 $ComputerName = $env:COMPUTERNAME
 $CurrentUser = $env:USERNAME
+
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
+$ReportFolder = Join-Path $ProjectRoot "reports"
+$Timestamp = Get-Date -Format "yyyy-MM-dd-HHmmss"
+$ReportFile = Join-Path $ReportFolder "$ComputerName-healthcheck-$Timestamp.txt"
+$ReportLines = New-Object System.Collections.Generic.List[string]
+
+if (-not (Test-Path $ReportFolder)) {
+    New-Item -Path $ReportFolder -ItemType Directory | Out-Null
+}
+
+function Add-ReportLine {
+    param (
+        [string]$Line = ""
+    )
+
+    $script:ReportLines.Add($Line) | Out-Null
+}
 
 function Write-Result {
     param (
@@ -29,6 +47,8 @@ function Write-Result {
 
     Write-Host "]$StatusPadding  " -NoNewline -ForegroundColor Gray
     Write-Host "$LabelPadded $Value" -ForegroundColor Gray
+
+    Add-ReportLine -Line ("[{0}]{1}  {2} {3}" -f $StatusUpper, $StatusPadding, $LabelPadded, $Value)
 }
 
 function Write-Section {
@@ -38,12 +58,20 @@ function Write-Section {
 
     Write-Host ""
     Write-Host "[$Title]" -ForegroundColor Gray
+
+    Add-ReportLine
+    Add-ReportLine -Line "[$Title]"
 }
 
 Write-Host "========================================" -ForegroundColor Gray
 Write-Host " ArcForge Studio Workstation Health Check" -ForegroundColor Gray
 Write-Host "========================================" -ForegroundColor Gray
 Write-Host ""
+
+Add-ReportLine -Line "========================================"
+Add-ReportLine -Line " ArcForge Studio Workstation Health Check"
+Add-ReportLine -Line "========================================"
+Add-ReportLine
 
 Write-Result -Status "OK" -Label "Computer Name:" -Value $ComputerName
 Write-Result -Status "OK" -Label "Current User:" -Value $CurrentUser
@@ -162,3 +190,10 @@ catch {
 
 Write-Host ""
 Write-Host "Health check complete." -ForegroundColor Gray
+Write-Host "Report saved to: $ReportFile" -ForegroundColor Gray
+
+Add-ReportLine
+Add-ReportLine -Line "Health check complete."
+Add-ReportLine -Line "Report saved to: $ReportFile"
+
+$ReportLines | Out-File -FilePath $ReportFile -Encoding UTF8
