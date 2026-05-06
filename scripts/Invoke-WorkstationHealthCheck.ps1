@@ -63,6 +63,44 @@ function Write-Section {
     Add-ReportLine -Line "[$Title]"
 }
 
+function Test-SoftwareInstalled {
+    param (
+        [string[]]$Commands = @(),
+        [string[]]$DisplayNamePatterns = @(),
+        [string[]]$CommonPaths = @()
+    )
+
+    foreach ($Command in $Commands) {
+        if (Get-Command $Command -ErrorAction SilentlyContinue) {
+            return $true
+        }
+    }
+
+    foreach ($Path in $CommonPaths) {
+        if ($Path -and (Test-Path $Path)) {
+            return $true
+        }
+    }
+
+    $RegistryPaths = @(
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )
+
+    foreach ($RegistryPath in $RegistryPaths) {
+        $InstalledApps = Get-ItemProperty $RegistryPath -ErrorAction SilentlyContinue
+
+        foreach ($Pattern in $DisplayNamePatterns) {
+            if ($InstalledApps.DisplayName -like $Pattern) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
 Write-Host "========================================" -ForegroundColor Gray
 Write-Host " ArcForge Studio Workstation Health Check" -ForegroundColor Gray
 Write-Host "========================================" -ForegroundColor Gray
@@ -190,6 +228,216 @@ catch {
 
 Write-Host ""
 Write-Host "Health check complete." -ForegroundColor Gray
+# Software Checks
+Write-Section -Title "SOFTWARE - CORE IT"
+
+$ProgramFilesX86 = ${env:ProgramFiles(x86)}
+
+$CoreTools = @(
+    @{
+        Name = "Git"
+        Commands = @("git")
+        DisplayNamePatterns = @("Git*")
+        CommonPaths = @(
+            "$env:ProgramFiles\Git\cmd\git.exe"
+        )
+    },
+    @{
+        Name = "VS Code"
+        Commands = @("code")
+        DisplayNamePatterns = @("Microsoft Visual Studio Code*", "Visual Studio Code*")
+        CommonPaths = @(
+            "$env:LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe",
+            "$env:ProgramFiles\Microsoft VS Code\Code.exe"
+        )
+    },
+    @{
+        Name = "PowerShell 7"
+        Commands = @("pwsh")
+        DisplayNamePatterns = @("PowerShell 7*", "Microsoft PowerShell*")
+        CommonPaths = @(
+            "$env:ProgramFiles\PowerShell\7\pwsh.exe"
+        )
+    },
+    @{
+        Name = "Notepad++"
+        Commands = @("notepad++")
+        DisplayNamePatterns = @("Notepad++*")
+        CommonPaths = @(
+            "$env:ProgramFiles\Notepad++\notepad++.exe",
+            "$ProgramFilesX86\Notepad++\notepad++.exe"
+        )
+    }
+)
+
+foreach ($Tool in $CoreTools) {
+    $Installed = Test-SoftwareInstalled `
+        -Commands $Tool.Commands `
+        -DisplayNamePatterns $Tool.DisplayNamePatterns `
+        -CommonPaths $Tool.CommonPaths
+
+    if ($Installed) {
+        Write-Result -Status "OK" -Label "$($Tool.Name):" -Value "Installed"
+    }
+    else {
+        Write-Result -Status "WARN" -Label "$($Tool.Name):" -Value "Not found"
+    }
+}
+
+Write-Section -Title "SOFTWARE - GAME DEV"
+
+$GameDevTools = @(
+    @{
+        Name = "Python"
+        Commands = @("python", "py")
+        DisplayNamePatterns = @("Python*")
+        CommonPaths = @(
+            "$env:LOCALAPPDATA\Programs\Python\Python*\python.exe",
+            "$env:ProgramFiles\Python*\python.exe"
+        )
+    },
+    @{
+        Name = "Visual Studio"
+        Commands = @("devenv")
+        DisplayNamePatterns = @("Microsoft Visual Studio*")
+        CommonPaths = @(
+            "$env:ProgramFiles\Microsoft Visual Studio\2022\Community\Common7\IDE\devenv.exe",
+            "$env:ProgramFiles\Microsoft Visual Studio\2022\Professional\Common7\IDE\devenv.exe",
+            "$env:ProgramFiles\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\devenv.exe"
+        )
+    },
+    @{
+        Name = "Perforce"
+        Commands = @("p4", "p4v")
+        DisplayNamePatterns = @("Perforce*", "Helix*")
+        CommonPaths = @(
+            "$env:ProgramFiles\Perforce\p4.exe",
+            "$env:ProgramFiles\Perforce\p4v.exe",
+            "$ProgramFilesX86\Perforce\p4.exe",
+            "$ProgramFilesX86\Perforce\p4v.exe"
+        )
+    },
+    @{
+        Name = "Unreal Engine"
+        Commands = @()
+        DisplayNamePatterns = @("Unreal Engine*", "Epic Games Launcher*")
+        CommonPaths = @(
+            "$env:ProgramFiles\Epic Games\UE_*",
+            "$env:ProgramFiles\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe"
+        )
+    }
+)
+
+foreach ($Tool in $GameDevTools) {
+    $Installed = Test-SoftwareInstalled `
+        -Commands $Tool.Commands `
+        -DisplayNamePatterns $Tool.DisplayNamePatterns `
+        -CommonPaths $Tool.CommonPaths
+
+    if ($Installed) {
+        Write-Result -Status "OK" -Label "$($Tool.Name):" -Value "Installed"
+    }
+    else {
+        Write-Result -Status "WARN" -Label "$($Tool.Name):" -Value "Not found"
+    }
+}
+
+Write-Section -Title "SOFTWARE - ART/PIPELINE"
+
+$ArtPipelineTools = @(
+    @{
+        Name = "Blender"
+        Commands = @("blender")
+        DisplayNamePatterns = @("Blender*")
+        CommonPaths = @(
+            "$env:ProgramFiles\Blender Foundation\Blender*\blender.exe"
+        )
+    },
+    @{
+        Name = "Maya"
+        Commands = @("maya")
+        DisplayNamePatterns = @("Autodesk Maya*")
+        CommonPaths = @(
+            "$env:ProgramFiles\Autodesk\Maya*\bin\maya.exe"
+        )
+    },
+    @{
+        Name = "Houdini"
+        Commands = @("houdini")
+        DisplayNamePatterns = @("Houdini*", "SideFX Houdini*")
+        CommonPaths = @(
+            "$env:ProgramFiles\Side Effects Software\Houdini*\bin\houdini.exe"
+        )
+    },
+    @{
+        Name = "ZBrush"
+        Commands = @()
+        DisplayNamePatterns = @("ZBrush*", "Maxon ZBrush*")
+        CommonPaths = @(
+            "$env:ProgramFiles\Maxon ZBrush*\ZBrush.exe",
+            "$env:ProgramFiles\Pixologic\ZBrush*\ZBrush.exe"
+        )
+    }
+)
+
+foreach ($Tool in $ArtPipelineTools) {
+    $Installed = Test-SoftwareInstalled `
+        -Commands $Tool.Commands `
+        -DisplayNamePatterns $Tool.DisplayNamePatterns `
+        -CommonPaths $Tool.CommonPaths
+
+    if ($Installed) {
+        Write-Result -Status "OK" -Label "$($Tool.Name):" -Value "Installed"
+    }
+    else {
+        Write-Result -Status "WARN" -Label "$($Tool.Name):" -Value "Not found"
+    }
+}
+
+Write-Section -Title "SOFTWARE - LAUNCHERS/QA"
+
+$LauncherQATools = @(
+    @{
+        Name = "Riot Client"
+        Commands = @()
+        DisplayNamePatterns = @("Riot Client*", "Riot Games*")
+        CommonPaths = @(
+            "C:\Riot Games\Riot Client\RiotClientServices.exe"
+        )
+    },
+    @{
+        Name = "Steam"
+        Commands = @("steam")
+        DisplayNamePatterns = @("Steam*")
+        CommonPaths = @(
+            "$ProgramFilesX86\Steam\steam.exe",
+            "$env:ProgramFiles\Steam\steam.exe"
+        )
+    },
+    @{
+        Name = "Epic Launcher"
+        Commands = @()
+        DisplayNamePatterns = @("Epic Games Launcher*")
+        CommonPaths = @(
+            "$env:ProgramFiles\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe",
+            "$ProgramFilesX86\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe"
+        )
+    }
+)
+
+foreach ($Tool in $LauncherQATools) {
+    $Installed = Test-SoftwareInstalled `
+        -Commands $Tool.Commands `
+        -DisplayNamePatterns $Tool.DisplayNamePatterns `
+        -CommonPaths $Tool.CommonPaths
+
+    if ($Installed) {
+        Write-Result -Status "OK" -Label "$($Tool.Name):" -Value "Installed"
+    }
+    else {
+        Write-Result -Status "WARN" -Label "$($Tool.Name):" -Value "Not found"
+    }
+}
 Write-Host "Report saved to: $ReportFile" -ForegroundColor Gray
 
 Add-ReportLine
