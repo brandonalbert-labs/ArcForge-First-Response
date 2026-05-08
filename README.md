@@ -1,31 +1,38 @@
-# ArcForge Studio IT Toolkit
+# ArcForge Battlestation Health Toolkit
 
-A PowerShell-based workstation health check toolkit designed around a fictional game studio environment.
+A lightweight PowerShell-based Windows health-check toolkit for gamers, creators, developers, homelabbers, and IT pros who want to quickly verify that a PC is ready for work, gaming, or production.
 
 ## Project Goal
 
-This project simulates the kind of endpoint health checks an IT Support Technician or Junior Sysadmin might perform for game developers, artists, QA testers, and production staff.
+ArcForge Battlestation Health Toolkit provides a quick baseline health check for Windows workstations.
 
-The goal is to quickly identify common workstation issues related to system health, storage, uptime, networking, installed tools, and basic security posture.
+The goal is to help identify common issues related to system health, uptime, storage, networking, installed tools, basic security posture, Windows Update readiness, running processes, and core Windows services.
 
-## Planned Features
+This project started as a fictional game studio IT toolkit, but the long-term direction is broader: a practical health-check tool for gaming PCs, creator workstations, developer systems, homelab admin machines, and secure workstations.
+
+## Current Features
 
 - System information check
-- Disk space check
 - Uptime check
+- Process readiness check
+- Top memory process visibility
+- Core Windows service readiness check
+- Disk space check
 - Network connectivity check
 - DNS resolution check
-- Required software check
-- Windows Defender status check
+- Required software checks
+- Firewall status check
+- Antivirus provider detection
 - Local administrator group review
-- Console output
+- Windows Update readiness check
+- Pending reboot detection
+- Last installed hotfix check
+- Console summary output
 - TXT report export
-- HTML report export
 
-## Example Use Case
+## Current Usage
 
-A game studio IT technician needs to quickly verify whether a developer workstation is healthy before escalating an issue. This script provides a fast baseline report that can be attached to a ticket or used during troubleshooting.
+Run from PowerShell:
 
-## Project Status
-
-In progress.
+```powershell
+.\scripts\Invoke-BattlestationHealthCheck.ps1

@@ -1,5 +1,5 @@
-# ArcForge Studio IT Toolkit
-# Workstation Health Check v0.9
+# ArcForge Battlestation Health Toolkit
+# Battlestation Health Check v0.10
 
 $ReportDate = Get-Date
 $ComputerName = $env:COMPUTERNAME
@@ -8,7 +8,7 @@ $CurrentUser = $env:USERNAME
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $ReportFolder = Join-Path $ProjectRoot "reports"
 $Timestamp = Get-Date -Format "yyyy-MM-dd-HHmmss"
-$ReportFile = Join-Path $ReportFolder "$ComputerName-healthcheck-$Timestamp.txt"
+$ReportFile = Join-Path $ReportFolder "$ComputerName-battlestation-healthcheck-$Timestamp.txt"
 $ReportLines = New-Object System.Collections.Generic.List[string]
 
 $CheckCounts = @{
@@ -148,14 +148,14 @@ function Test-SoftwareInstalled {
     return $false
 }
 
-Write-Host "========================================" -ForegroundColor Gray
-Write-Host " ArcForge Studio Workstation Health Check" -ForegroundColor Gray
-Write-Host "========================================" -ForegroundColor Gray
+Write-Host "=======================================" -ForegroundColor Gray
+Write-Host " ArcForge Battlestation Health Toolkit" -ForegroundColor Gray
+Write-Host "=======================================" -ForegroundColor Gray
 Write-Host ""
 
-Add-ReportLine -Line "========================================"
-Add-ReportLine -Line " ArcForge Studio Workstation Health Check"
-Add-ReportLine -Line "========================================"
+Add-ReportLine -Line "======================================="
+Add-ReportLine -Line " ArcForge Battlestation Health Toolkit"
+Add-ReportLine -Line "======================================="
 Add-ReportLine
 
 Write-Result -Status "OK" -Label "Computer Name:" -Value $ComputerName
@@ -357,7 +357,7 @@ catch {
 }
 
 # Software Checks
-Write-Section -Title "SOFTWARE - CORE IT"
+Write-Section -Title "SOFTWARE - CORE TOOLS"
 
 $ProgramFilesX86 = ${env:ProgramFiles(x86)}
 
@@ -412,7 +412,7 @@ foreach ($Tool in $CoreTools) {
     }
 }
 
-Write-Section -Title "SOFTWARE - GAME DEV"
+Write-Section -Title "SOFTWARE - DEV/GAME"
 
 $GameDevTools = @(
     @{
@@ -470,7 +470,7 @@ foreach ($Tool in $GameDevTools) {
     }
 }
 
-Write-Section -Title "SOFTWARE - ART/PIPELINE"
+Write-Section -Title "SOFTWARE - CREATOR/ART"
 
 $ArtPipelineTools = @(
     @{
@@ -522,7 +522,7 @@ foreach ($Tool in $ArtPipelineTools) {
     }
 }
 
-Write-Section -Title "SOFTWARE - LAUNCHERS/QA"
+Write-Section -Title "SOFTWARE - GAMING/LAUNCHERS"
 
 $LauncherQATools = @(
     @{
