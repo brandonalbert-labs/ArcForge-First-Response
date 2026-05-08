@@ -11,6 +11,12 @@ $Timestamp = Get-Date -Format "yyyy-MM-dd-HHmmss"
 $ReportFile = Join-Path $ReportFolder "$ComputerName-healthcheck-$Timestamp.txt"
 $ReportLines = New-Object System.Collections.Generic.List[string]
 
+$CheckCounts = @{
+    OK = 0
+    WARN = 0
+    FAIL = 0
+}
+
 if (-not (Test-Path $ReportFolder)) {
     New-Item -Path $ReportFolder -ItemType Directory | Out-Null
 }
@@ -27,7 +33,8 @@ function Write-Result {
     param (
         [string]$Status,
         [string]$Label,
-        [string]$Value
+        [string]$Value,
+        [bool]$CountResult = $true
     )
 
     $StatusUpper = $Status.ToUpper()
@@ -35,6 +42,10 @@ function Write-Result {
     $CurrentStatusWidth = $StatusUpper.Length + 2
     $StatusPadding = " " * ($StatusFieldWidth - $CurrentStatusWidth)
     $LabelPadded = "{0,-18}" -f $Label
+
+    if ($CountResult -and $script:CheckCounts.ContainsKey($StatusUpper)) {
+        $script:CheckCounts[$StatusUpper]++
+    }
 
     Write-Host "[" -NoNewline -ForegroundColor Gray
 
@@ -61,6 +72,42 @@ function Write-Section {
 
     Add-ReportLine
     Add-ReportLine -Line "[$Title]"
+}
+
+function Write-Summary {
+    Write-Section -Title "SUMMARY"
+
+    $PassedChecks = $script:CheckCounts.OK
+    $Warnings = $script:CheckCounts.WARN
+    $Failures = $script:CheckCounts.FAIL
+    $TotalChecks = $PassedChecks + $Warnings + $Failures
+
+    Write-Result -Status "OK" -Label "Total Checks:" -Value $TotalChecks -CountResult:$false
+    Write-Result -Status "OK" -Label "Passed Checks:" -Value $PassedChecks -CountResult:$false
+
+    if ($Warnings -gt 0) {
+        Write-Result -Status "WARN" -Label "Warnings:" -Value $Warnings -CountResult:$false
+    }
+    else {
+        Write-Result -Status "OK" -Label "Warnings:" -Value $Warnings -CountResult:$false
+    }
+
+    if ($Failures -gt 0) {
+        Write-Result -Status "FAIL" -Label "Failures:" -Value $Failures -CountResult:$false
+    }
+    else {
+        Write-Result -Status "OK" -Label "Failures:" -Value $Failures -CountResult:$false
+    }
+
+    if ($Failures -gt 0) {
+        Write-Result -Status "FAIL" -Label "Overall Status:" -Value "Action required" -CountResult:$false
+    }
+    elseif ($Warnings -gt 0) {
+        Write-Result -Status "WARN" -Label "Overall Status:" -Value "Attention recommended" -CountResult:$false
+    }
+    else {
+        Write-Result -Status "OK" -Label "Overall Status:" -Value "Healthy" -CountResult:$false
+    }
 }
 
 function Test-SoftwareInstalled {
@@ -226,8 +273,6 @@ catch {
     Write-Result -Status "FAIL" -Label "DNS Resolution:" -Value "Failed to resolve github.com"
 }
 
-Write-Host ""
-Write-Host "Health check complete." -ForegroundColor Gray
 # Software Checks
 Write-Section -Title "SOFTWARE - CORE IT"
 
@@ -438,6 +483,11 @@ foreach ($Tool in $LauncherQATools) {
         Write-Result -Status "WARN" -Label "$($Tool.Name):" -Value "Not found"
     }
 }
+
+Write-Summary
+
+Write-Host ""
+Write-Host "Health check complete." -ForegroundColor Gray
 Write-Host "Report saved to: $ReportFile" -ForegroundColor Gray
 
 Add-ReportLine
