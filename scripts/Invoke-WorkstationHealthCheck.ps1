@@ -1,5 +1,5 @@
 # ArcForge Studio IT Toolkit
-# Workstation Health Check v0.7
+# Workstation Health Check v0.8
 
 $ReportDate = Get-Date
 $ComputerName = $env:COMPUTERNAME
@@ -546,6 +546,92 @@ try {
 }
 catch {
     Write-Result -Status "WARN" -Label "Local Admins:" -Value "Unable to query local administrators"
+}
+
+# Windows Update Checks
+Write-Section -Title "UPDATES"
+
+try {
+    $WindowsUpdateService = Get-CimInstance Win32_Service -Filter "Name='wuauserv'" -ErrorAction Stop
+
+    if ($WindowsUpdateService.StartMode -eq "Disabled") {
+        Write-Result -Status "WARN" -Label "Update Service:" -Value "Disabled"
+    }
+    elseif ($WindowsUpdateService.State -eq "Running") {
+        Write-Result -Status "OK" -Label "Update Service:" -Value "$($WindowsUpdateService.StartMode) / Running"
+    }
+    else {
+        Write-Result -Status "OK" -Label "Update Service:" -Value "$($WindowsUpdateService.StartMode) / $($WindowsUpdateService.State) - available on demand"
+    }
+}
+catch {
+    Write-Result -Status "WARN" -Label "Update Service:" -Value "Unable to query Windows Update service"
+}
+
+try {
+    $BitsService = Get-CimInstance Win32_Service -Filter "Name='BITS'" -ErrorAction Stop
+
+    if ($BitsService.StartMode -eq "Disabled") {
+        Write-Result -Status "WARN" -Label "BITS Service:" -Value "Disabled"
+    }
+    elseif ($BitsService.State -eq "Running") {
+        Write-Result -Status "OK" -Label "BITS Service:" -Value "$($BitsService.StartMode) / Running"
+    }
+    else {
+        Write-Result -Status "OK" -Label "BITS Service:" -Value "$($BitsService.StartMode) / $($BitsService.State) - available on demand"
+    }
+}
+catch {
+    Write-Result -Status "WARN" -Label "BITS Service:" -Value "Unable to query BITS service"
+}
+
+try {
+    $PendingRebootPaths = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending",
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
+        "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager"
+    )
+
+    $PendingReboot = $false
+
+    foreach ($Path in $PendingRebootPaths) {
+        if ($Path -eq "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager") {
+            $PendingFileRename = Get-ItemProperty -Path $Path -Name "PendingFileRenameOperations" -ErrorAction SilentlyContinue
+
+            if ($PendingFileRename) {
+                $PendingReboot = $true
+            }
+        }
+        elseif (Test-Path $Path) {
+            $PendingReboot = $true
+        }
+    }
+
+    if ($PendingReboot) {
+        Write-Result -Status "WARN" -Label "Pending Reboot:" -Value "Detected - reboot recommended"
+    }
+    else {
+        Write-Result -Status "OK" -Label "Pending Reboot:" -Value "Not detected"
+    }
+}
+catch {
+    Write-Result -Status "WARN" -Label "Pending Reboot:" -Value "Unable to determine reboot status"
+}
+
+try {
+    $LatestHotFix = Get-HotFix |
+        Sort-Object InstalledOn -Descending |
+        Select-Object -First 1
+
+    if ($LatestHotFix) {
+        Write-Result -Status "OK" -Label "Last Hotfix:" -Value "$($LatestHotFix.HotFixID) installed on $($LatestHotFix.InstalledOn.ToShortDateString())"
+    }
+    else {
+        Write-Result -Status "WARN" -Label "Last Hotfix:" -Value "No hotfix history found"
+    }
+}
+catch {
+    Write-Result -Status "WARN" -Label "Last Hotfix:" -Value "Unable to query hotfix history"
 }
 
 Write-Summary
