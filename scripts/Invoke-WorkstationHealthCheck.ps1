@@ -1,5 +1,5 @@
 # ArcForge Studio IT Toolkit
-# Workstation Health Check v0.6
+# Workstation Health Check v0.7
 
 $ReportDate = Get-Date
 $ComputerName = $env:COMPUTERNAME
@@ -519,24 +519,18 @@ catch {
 }
 
 try {
-    $DefenderStatus = Get-MpComputerStatus -ErrorAction Stop
+    $AntivirusProducts = Get-CimInstance -Namespace "root\SecurityCenter2" -ClassName AntiVirusProduct -ErrorAction Stop
 
-    if ($DefenderStatus.AntivirusEnabled) {
-        Write-Result -Status "OK" -Label "Defender AV:" -Value "Enabled"
+    if ($AntivirusProducts) {
+        $AntivirusNames = ($AntivirusProducts.displayName | Sort-Object -Unique) -join ", "
+        Write-Result -Status "OK" -Label "Antivirus:" -Value "$AntivirusNames registered"
     }
     else {
-        Write-Result -Status "FAIL" -Label "Defender AV:" -Value "Disabled"
-    }
-
-    if ($DefenderStatus.RealTimeProtectionEnabled) {
-        Write-Result -Status "OK" -Label "Real-Time Protect:" -Value "Enabled"
-    }
-    else {
-        Write-Result -Status "FAIL" -Label "Real-Time Protect:" -Value "Disabled"
+        Write-Result -Status "WARN" -Label "Antivirus:" -Value "No registered antivirus provider found"
     }
 }
 catch {
-    Write-Result -Status "WARN" -Label "Defender:" -Value "Unable to query Defender status - verify manually"
+    Write-Result -Status "WARN" -Label "Antivirus:" -Value "Unable to query antivirus provider"
 }
 
 try {
