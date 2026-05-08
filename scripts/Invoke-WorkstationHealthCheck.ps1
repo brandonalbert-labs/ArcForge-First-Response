@@ -1,5 +1,5 @@
 # ArcForge Studio IT Toolkit
-# Workstation Health Check v0.8
+# Workstation Health Check v0.9
 
 $ReportDate = Get-Date
 $ComputerName = $env:COMPUTERNAME
@@ -195,6 +195,89 @@ try {
 }
 catch {
     Write-Result -Status "FAIL" -Label "Uptime:" -Value $_.Exception.Message
+}
+
+# Process Readiness Checks
+Write-Section -Title "PROCESSES"
+
+try {
+    $HungProcesses = Get-Process -ErrorAction Stop |
+        Where-Object {
+            $_.MainWindowTitle -and
+            $_.Responding -eq $false
+        }
+
+    if ($HungProcesses.Count -gt 0) {
+        $HungNames = ($HungProcesses.ProcessName | Sort-Object -Unique) -join ", "
+        Write-Result -Status "WARN" -Label "Hung Apps:" -Value "$($HungProcesses.Count) non-responding app(s): $HungNames"
+    }
+    else {
+        Write-Result -Status "OK" -Label "Hung Apps:" -Value "None detected"
+    }
+}
+catch {
+    Write-Result -Status "WARN" -Label "Hung Apps:" -Value "Unable to query process responsiveness"
+}
+
+try {
+    $TopMemoryProcesses = Get-Process -ErrorAction Stop |
+        Sort-Object WorkingSet64 -Descending |
+        Select-Object -First 5
+
+    foreach ($Process in $TopMemoryProcesses) {
+        $MemoryMB = [math]::Round($Process.WorkingSet64 / 1MB, 2)
+        Write-Result -Status "OK" -Label "Top Memory:" -Value "$($Process.ProcessName) - $MemoryMB MB" -CountResult:$false
+    }
+}
+catch {
+    Write-Result -Status "WARN" -Label "Memory Usage:" -Value "Unable to query top memory processes"
+}
+
+# Service Readiness Checks
+Write-Section -Title "SERVICES"
+
+# Core workstation services only.
+# Antivirus/security provider service validation will be handled separately later
+# so third-party AV products do not trigger false Defender warnings.
+$CoreServices = @(
+    @{
+        Name = "EventLog"
+        Label = "Event Log:"
+    },
+    @{
+        Name = "Winmgmt"
+        Label = "WMI:"
+    },
+    @{
+        Name = "LanmanWorkstation"
+        Label = "Workstation:"
+    },
+    @{
+        Name = "Dnscache"
+        Label = "DNS Client:"
+    }
+)
+
+foreach ($Service in $CoreServices) {
+    try {
+        $ServiceInfo = Get-CimInstance Win32_Service -Filter "Name='$($Service.Name)'" -ErrorAction Stop
+
+        if (-not $ServiceInfo) {
+            Write-Result -Status "WARN" -Label $Service.Label -Value "Service not found"
+        }
+        elseif ($ServiceInfo.StartMode -eq "Disabled") {
+            Write-Result -Status "WARN" -Label $Service.Label -Value "Disabled"
+        }
+        elseif ($ServiceInfo.State -eq "Running") {
+            Write-Result -Status "OK" -Label $Service.Label -Value "$($ServiceInfo.StartMode) / Running"
+        }
+        else {
+            Write-Result -Status "WARN" -Label $Service.Label -Value "$($ServiceInfo.StartMode) / $($ServiceInfo.State)"
+        }
+    }
+    catch {
+        Write-Result -Status "WARN" -Label $Service.Label -Value "Unable to query service"
+    }
 }
 
 # Storage Check
