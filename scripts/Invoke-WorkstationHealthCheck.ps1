@@ -1,5 +1,5 @@
 # ArcForge Studio IT Toolkit
-# Workstation Health Check v0.3
+# Workstation Health Check v0.6
 
 $ReportDate = Get-Date
 $ComputerName = $env:COMPUTERNAME
@@ -482,6 +482,76 @@ foreach ($Tool in $LauncherQATools) {
     else {
         Write-Result -Status "WARN" -Label "$($Tool.Name):" -Value "Not found"
     }
+}
+
+# Security Checks
+Write-Section -Title "SECURITY"
+
+try {
+    $FirewallProfiles = Get-NetFirewallProfile -ErrorAction Stop
+    $DisabledProfiles = $FirewallProfiles | Where-Object { $_.Enabled -eq $false }
+
+    if ($DisabledProfiles.Count -eq 0) {
+        Write-Result -Status "OK" -Label "Firewall:" -Value "Enabled for all profiles"
+    }
+    else {
+        $DisabledNames = ($DisabledProfiles.Name -join ", ")
+        Write-Result -Status "WARN" -Label "Firewall:" -Value "Disabled profile(s): $DisabledNames"
+    }
+}
+catch {
+    try {
+        $FirewallState = netsh advfirewall show allprofiles state
+
+        if ($FirewallState -match "State\s+OFF") {
+            Write-Result -Status "WARN" -Label "Firewall:" -Value "One or more profiles may be disabled"
+        }
+        elseif ($FirewallState -match "State\s+ON") {
+            Write-Result -Status "OK" -Label "Firewall:" -Value "Enabled - verified with netsh"
+        }
+        else {
+            Write-Result -Status "WARN" -Label "Firewall:" -Value "Unable to determine firewall state"
+        }
+    }
+    catch {
+        Write-Result -Status "WARN" -Label "Firewall:" -Value "Unable to query firewall status"
+    }
+}
+
+try {
+    $DefenderStatus = Get-MpComputerStatus -ErrorAction Stop
+
+    if ($DefenderStatus.AntivirusEnabled) {
+        Write-Result -Status "OK" -Label "Defender AV:" -Value "Enabled"
+    }
+    else {
+        Write-Result -Status "FAIL" -Label "Defender AV:" -Value "Disabled"
+    }
+
+    if ($DefenderStatus.RealTimeProtectionEnabled) {
+        Write-Result -Status "OK" -Label "Real-Time Protect:" -Value "Enabled"
+    }
+    else {
+        Write-Result -Status "FAIL" -Label "Real-Time Protect:" -Value "Disabled"
+    }
+}
+catch {
+    Write-Result -Status "WARN" -Label "Defender:" -Value "Unable to query Defender status - verify manually"
+}
+
+try {
+    $LocalAdmins = Get-LocalGroupMember -Group "Administrators" -ErrorAction Stop
+    $AdminCount = $LocalAdmins.Count
+
+    if ($AdminCount -le 1) {
+        Write-Result -Status "OK" -Label "Local Admins:" -Value "$AdminCount member"
+    }
+    else {
+        Write-Result -Status "WARN" -Label "Local Admins:" -Value "$AdminCount members - review recommended"
+    }
+}
+catch {
+    Write-Result -Status "WARN" -Label "Local Admins:" -Value "Unable to query local administrators"
 }
 
 Write-Summary
