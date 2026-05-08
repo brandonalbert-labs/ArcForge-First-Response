@@ -36,3 +36,22 @@ Run from PowerShell:
 
 ```powershell
 .\scripts\Invoke-BattlestationHealthCheck.ps1
+
+## Profiles
+
+The toolkit currently supports basic profile selection groundwork.
+
+Available profiles:
+
+- General
+- Gaming
+- Creator
+- Developer
+- Homelab
+- Secure
+- Full
+
+Example:
+
+```powershell
+.\scripts\Invoke-BattlestationHealthCheck.ps1 -Profile Gaming

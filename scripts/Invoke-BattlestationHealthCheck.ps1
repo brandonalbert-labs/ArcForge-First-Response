@@ -1,5 +1,10 @@
 # ArcForge Battlestation Health Toolkit
-# Battlestation Health Check v0.10
+# Battlestation Health Check v0.11
+
+param (
+    [ValidateSet("General", "Gaming", "Creator", "Developer", "Homelab", "Secure", "Full")]
+    [string]$BattlestationProfile = "General"
+)
 
 $ReportDate = Get-Date
 $ComputerName = $env:COMPUTERNAME
@@ -8,7 +13,8 @@ $CurrentUser = $env:USERNAME
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $ReportFolder = Join-Path $ProjectRoot "reports"
 $Timestamp = Get-Date -Format "yyyy-MM-dd-HHmmss"
-$ReportFile = Join-Path $ReportFolder "$ComputerName-battlestation-healthcheck-$Timestamp.txt"
+$ProfileNameForFile = $BattlestationProfile.ToLower()
+$ReportFile = Join-Path $ReportFolder "$ComputerName-$ProfileNameForFile-battlestation-healthcheck-$Timestamp.txt"
 $ReportLines = New-Object System.Collections.Generic.List[string]
 
 $CheckCounts = @{
@@ -161,6 +167,7 @@ Add-ReportLine
 Write-Result -Status "OK" -Label "Computer Name:" -Value $ComputerName
 Write-Result -Status "OK" -Label "Current User:" -Value $CurrentUser
 Write-Result -Status "OK" -Label "Report Date:" -Value $ReportDate
+Write-Result -Status "OK" -Label "Active Profile:" -Value $BattlestationProfile
 
 # System Checks
 Write-Section -Title "SYSTEM"
