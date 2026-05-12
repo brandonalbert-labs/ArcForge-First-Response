@@ -1,5 +1,5 @@
-# ArcForge Battlestation Health Toolkit
-# Battlestation Health Check v0.11
+# ArcForge First Response
+# ArcForge First Response Report v0.13
 
 param (
     [ValidateSet("General", "Gaming", "Creator", "Developer", "Homelab", "Secure")]
@@ -14,7 +14,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $ReportFolder = Join-Path $ProjectRoot "reports"
 $Timestamp = Get-Date -Format "yyyy-MM-dd-HHmmss"
 $ProfileNameForFile = $BattlestationProfile.ToLower()
-$ReportFile = Join-Path $ReportFolder "$ComputerName-$ProfileNameForFile-battlestation-healthcheck-$Timestamp.txt"
+$ReportFile = Join-Path $ReportFolder "$ComputerName-$ProfileNameForFile-first-response-$Timestamp.txt"
 $ReportLines = New-Object System.Collections.Generic.List[string]
 
 $CheckCounts = @{
@@ -476,14 +476,14 @@ function Get-SoftwareDetectionConfig {
     }
 }
 
-Write-Host "=======================================" -ForegroundColor Gray
-Write-Host " ArcForge Battlestation Health Toolkit" -ForegroundColor Gray
-Write-Host "=======================================" -ForegroundColor Gray
+Write-Host "=========================" -ForegroundColor Gray
+Write-Host " ArcForge First Response" -ForegroundColor Gray
+Write-Host "=========================" -ForegroundColor Gray
 Write-Host ""
 
-Add-ReportLine -Line "======================================="
-Add-ReportLine -Line " ArcForge Battlestation Health Toolkit"
-Add-ReportLine -Line "======================================="
+Add-ReportLine -Line "========================="
+Add-ReportLine -Line " ArcForge First Response"
+Add-ReportLine -Line "========================="
 Add-ReportLine
 
 Write-Result -Status "OK" -Label "Computer Name:" -Value $ComputerName

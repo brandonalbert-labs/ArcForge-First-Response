@@ -1,10 +1,10 @@
-# ArcForge Battlestation Health Toolkit
+# ArcForge First Response
 
 A lightweight PowerShell-based Windows health-check toolkit for gamers, creators, developers, homelabbers, secure workstations, and IT pros who want to quickly verify that a PC is ready for work, gaming, or production.
 
 ## Project Goal
 
-ArcForge Battlestation Health Toolkit provides a quick baseline health check for Windows workstations.
+ArcForge First Response is a free Windows battlestation readiness and troubleshooting toolkit. Run ArcForge to check system health, networking, core services, security basics, installed apps, and profile-specific requirements for your gaming, creator, developer, IT, secure, or homelab workstation.
 
 The goal is to help identify common issues related to system health, uptime, storage, networking, installed tools, basic security posture, Windows Update readiness, running processes, and core Windows services.
 
@@ -32,7 +32,20 @@ This project started as a fictional game studio IT toolkit, but the long-term di
 
 ## Current Usage
 
-Run from PowerShell:
+Run from PowerShell at the repository root:
 
 ```powershell
-.\scripts\Invoke-BattlestationHealthCheck.ps1
+.\arcforge.ps1
+```
+
+Run a specific Battlestation Profile:
+
+```powershell
+.\arcforge.ps1 -BattlestationProfile Developer
+```
+
+You can also run the main script directly:
+
+```powershell
+.\scripts\Invoke-ArcForgeFirstResponse.ps1 -BattlestationProfile Developer
+```
