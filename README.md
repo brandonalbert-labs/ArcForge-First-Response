@@ -1,6 +1,6 @@
 # ArcForge Battlestation Health Toolkit
 
-A lightweight PowerShell-based Windows health-check toolkit for gamers, creators, developers, homelabbers, and IT pros who want to quickly verify that a PC is ready for work, gaming, or production.
+A lightweight PowerShell-based Windows health-check toolkit for gamers, creators, developers, homelabbers, secure workstations, and IT pros who want to quickly verify that a PC is ready for work, gaming, or production.
 
 ## Project Goal
 
@@ -8,7 +8,7 @@ ArcForge Battlestation Health Toolkit provides a quick baseline health check for
 
 The goal is to help identify common issues related to system health, uptime, storage, networking, installed tools, basic security posture, Windows Update readiness, running processes, and core Windows services.
 
-This project started as a fictional game studio IT toolkit, but the long-term direction is broader: a practical health-check tool for gaming PCs, creator workstations, developer systems, homelab admin machines, and secure workstations.
+This project started as a fictional game studio IT toolkit, but the long-term direction is broader: a practical, profile-aware workstation readiness and first-response toolkit for gaming PCs, creator workstations, developer systems, homelab admin machines, and secure desktops.
 
 ## Current Features
 
@@ -20,7 +20,7 @@ This project started as a fictional game studio IT toolkit, but the long-term di
 - Disk space check
 - Network connectivity check
 - DNS resolution check
-- Required software checks
+- Profile-aware software checks
 - Firewall status check
 - Antivirus provider detection
 - Local administrator group review
@@ -36,22 +36,3 @@ Run from PowerShell:
 
 ```powershell
 .\scripts\Invoke-BattlestationHealthCheck.ps1
-
-## Profiles
-
-The toolkit currently supports basic profile selection groundwork.
-
-Available profiles:
-
-- General
-- Gaming
-- Creator
-- Developer
-- Homelab
-- Secure
-- Full
-
-Example:
-
-```powershell
-.\scripts\Invoke-BattlestationHealthCheck.ps1 -Profile Gaming

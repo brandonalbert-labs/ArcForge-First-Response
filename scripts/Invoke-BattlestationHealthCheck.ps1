@@ -2,7 +2,7 @@
 # Battlestation Health Check v0.11
 
 param (
-    [ValidateSet("General", "Gaming", "Creator", "Developer", "Homelab", "Secure", "Full")]
+    [ValidateSet("General", "Gaming", "Creator", "Developer", "Homelab", "Secure")]
     [string]$BattlestationProfile = "General"
 )
 
@@ -118,20 +118,152 @@ function Write-Summary {
 
 function Test-SoftwareInstalled {
     param (
+        [string]$SoftwareName = "",
         [string[]]$Commands = @(),
         [string[]]$DisplayNamePatterns = @(),
-        [string[]]$CommonPaths = @()
+        [string[]]$CommonPaths = @(),
+        [string[]]$Services = @()
     )
 
-    foreach ($Command in $Commands) {
-        if (Get-Command $Command -ErrorAction SilentlyContinue) {
+    # Known-app fallback: VS Code
+    if ($SoftwareName -eq "VS Code") {
+        $VsCodePaths = @(
+            "$env:ProgramFiles\Microsoft VS Code\Code.exe",
+            "${env:ProgramFiles(x86)}\Microsoft VS Code\Code.exe",
+            "$env:LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe"
+        )
+
+        if (Get-Command "code" -ErrorAction SilentlyContinue) {
+            return $true
+        }
+
+        foreach ($Path in $VsCodePaths) {
+            if (Test-Path $Path) {
+                return $true
+            }
+        }
+
+        $RegistryMatches = Get-ItemProperty `
+            "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", `
+            "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*", `
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "*Visual Studio Code*" }
+
+        if ($RegistryMatches) {
             return $true
         }
     }
 
+    # Known software detection normalization.
+    # This supplements the CSV catalog when Detection Target is too human-readable.
+    $KnownSoftwareDetections = @{
+        "Chrome" = @{
+            Commands = @("chrome")
+            DisplayNamePatterns = @("Google Chrome*")
+            CommonPaths = @(
+                "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+                "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
+            )
+        }
+
+        "PowerShell" = @{
+            Commands = @("pwsh")
+            DisplayNamePatterns = @("PowerShell*", "Microsoft PowerShell*")
+            CommonPaths = @(
+                "$env:ProgramFiles\PowerShell\7\pwsh.exe"
+            )
+        }
+
+        "Notepad++" = @{
+            Commands = @("notepad++")
+            DisplayNamePatterns = @("Notepad++*")
+            CommonPaths = @(
+                "$env:ProgramFiles\Notepad++\notepad++.exe",
+                "${env:ProgramFiles(x86)}\Notepad++\notepad++.exe"
+            )
+        }
+
+        "Windows Terminal" = @{
+            Commands = @("wt")
+            DisplayNamePatterns = @("Windows Terminal*", "Microsoft Windows Terminal*")
+            CommonPaths = @(
+                "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe"
+            )
+        }
+
+        "7-Zip" = @{
+            Commands = @("7z")
+            DisplayNamePatterns = @("7-Zip*", "7zip*")
+            CommonPaths = @(
+                "$env:ProgramFiles\7-Zip\7z.exe",
+                "$env:ProgramFiles\7-Zip\7zFM.exe",
+                "${env:ProgramFiles(x86)}\7-Zip\7z.exe",
+                "${env:ProgramFiles(x86)}\7-Zip\7zFM.exe"
+            )
+        }
+
+        "OpenHashTab" = @{
+            Commands = @()
+            DisplayNamePatterns = @("OpenHashTab*")
+            CommonPaths = @()
+        }
+
+        "FFmpeg (full)" = @{
+            Commands = @("ffmpeg")
+            DisplayNamePatterns = @("FFmpeg*", "Gyan.FFmpeg*", "Gyan FFmpeg*")
+            CommonPaths = @(
+                "$env:ProgramFiles\ffmpeg\bin\ffmpeg.exe",
+                "${env:ProgramFiles(x86)}\ffmpeg\bin\ffmpeg.exe"
+            )
+        }
+
+        "Python3" = @{
+            Commands = @("python", "py")
+            DisplayNamePatterns = @("Python*")
+            CommonPaths = @(
+                "$env:LOCALAPPDATA\Programs\Python\Python*\python.exe",
+                "$env:ProgramFiles\Python*\python.exe",
+                "${env:ProgramFiles(x86)}\Python*\python.exe"
+            )
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($SoftwareName)) {
+        if ($KnownSoftwareDetections.ContainsKey($SoftwareName)) {
+            $KnownDetection = $KnownSoftwareDetections[$SoftwareName]
+
+            $Commands += $KnownDetection.Commands
+            $DisplayNamePatterns += $KnownDetection.DisplayNamePatterns
+            $CommonPaths += $KnownDetection.CommonPaths
+        }
+    }
+
+    foreach ($Command in $Commands) {
+        if (-not [string]::IsNullOrWhiteSpace($Command)) {
+            if (Get-Command $Command -ErrorAction SilentlyContinue) {
+                return $true
+            }
+        }
+    }
+
+    foreach ($Service in $Services) {
+        if (-not [string]::IsNullOrWhiteSpace($Service)) {
+            if (Get-Service -Name $Service -ErrorAction SilentlyContinue) {
+                return $true
+            }
+
+            if (Get-CimInstance Win32_Service -Filter "Name='$Service'" -ErrorAction SilentlyContinue) {
+                return $true
+            }
+        }
+    }
+
     foreach ($Path in $CommonPaths) {
-        if ($Path -and (Test-Path $Path)) {
-            return $true
+        if (-not [string]::IsNullOrWhiteSpace($Path)) {
+            if (Test-Path $Path) {
+                return $true
+            }
         }
     }
 
@@ -145,13 +277,203 @@ function Test-SoftwareInstalled {
         $InstalledApps = Get-ItemProperty $RegistryPath -ErrorAction SilentlyContinue
 
         foreach ($Pattern in $DisplayNamePatterns) {
-            if ($InstalledApps.DisplayName -like $Pattern) {
-                return $true
+            if (-not [string]::IsNullOrWhiteSpace($Pattern)) {
+                if ($InstalledApps.DisplayName -like $Pattern) {
+                    return $true
+                }
+            }
+        }
+    }
+
+    # Generic fallback: match installed programs by software name.
+    # This helps catch normal desktop apps when catalog detection targets are too human-readable.
+    if (-not [string]::IsNullOrWhiteSpace($SoftwareName)) {
+        $SafeSoftwareName = $SoftwareName.Trim()
+
+        $NameFallbackPatterns = @(
+            "*$SafeSoftwareName*"
+        )
+
+        # Small normalization helpers for common catalog display names.
+        switch -Wildcard ($SafeSoftwareName) {
+            "Chrome" {
+                $NameFallbackPatterns += "*Google Chrome*"
+            }
+            "PowerShell" {
+                $NameFallbackPatterns += "*PowerShell*"
+                $NameFallbackPatterns += "*Microsoft PowerShell*"
+            }
+            "Windows Terminal" {
+                $NameFallbackPatterns += "*Windows Terminal*"
+            }
+            "7-Zip" {
+                $NameFallbackPatterns += "*7-Zip*"
+                $NameFallbackPatterns += "*7zip*"
+            }
+            "Notepad++" {
+                $NameFallbackPatterns += "*Notepad++*"
+            }
+            "OpenHashTab" {
+                $NameFallbackPatterns += "*OpenHashTab*"
+            }
+            "Firefox" {
+                $NameFallbackPatterns += "*Mozilla Firefox*"
+            }
+            "Discord" {
+                $NameFallbackPatterns += "*Discord*"
+            }
+        }
+
+        foreach ($RegistryPath in $RegistryPaths) {
+            $InstalledApps = Get-ItemProperty $RegistryPath -ErrorAction SilentlyContinue
+
+            foreach ($Pattern in $NameFallbackPatterns) {
+                if ($InstalledApps.DisplayName -like $Pattern) {
+                    return $true
+                }
             }
         }
     }
 
     return $false
+}
+
+function Test-YesValue {
+    param (
+        [object]$Value
+    )
+
+    return (([string]$Value).Trim().ToLower() -eq "yes")
+}
+
+function Get-CatalogValue {
+    param (
+        [pscustomobject]$Row,
+        [string]$ColumnName
+    )
+
+    $Property = $Row.PSObject.Properties[$ColumnName]
+
+    if ($Property) {
+        return ([string]$Property.Value).Trim()
+    }
+
+    return ""
+}
+
+function Get-DisplayNamePatterns {
+    param (
+        [string]$SoftwareName,
+        [string]$DetectionTarget
+    )
+
+    $Patterns = New-Object System.Collections.Generic.List[string]
+
+    if (-not [string]::IsNullOrWhiteSpace($SoftwareName)) {
+        $Patterns.Add("*$SoftwareName*") | Out-Null
+
+        $BaseName = ($SoftwareName -replace "\s*\(.*?\)", "").Trim()
+        if ($BaseName -and $BaseName -ne $SoftwareName) {
+            $Patterns.Add("*$BaseName*") | Out-Null
+        }
+    }
+
+    if ($DetectionTarget -match "matching\s+(.+)$") {
+        $TargetName = $Matches[1].Trim()
+        if ($TargetName) {
+            $Patterns.Add("*$TargetName*") | Out-Null
+
+            $TargetBaseName = ($TargetName -replace "\s*\(.*?\)", "").Trim()
+            if ($TargetBaseName -and $TargetBaseName -ne $TargetName) {
+                $Patterns.Add("*$TargetBaseName*") | Out-Null
+            }
+        }
+    }
+
+    return @($Patterns | Sort-Object -Unique)
+}
+
+function Split-DetectionCandidates {
+    param (
+        [string]$DetectionTarget
+    )
+
+    if ([string]::IsNullOrWhiteSpace($DetectionTarget)) {
+        return @()
+    }
+
+    return @(
+        $DetectionTarget -split "\s*/\s*|;|,|\s+or\s+" |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+}
+
+function Get-SoftwareDetectionConfig {
+    param (
+        [pscustomobject]$CatalogRow
+    )
+
+    $SoftwareName = Get-CatalogValue -Row $CatalogRow -ColumnName "Software Name"
+    $DetectionMethod = Get-CatalogValue -Row $CatalogRow -ColumnName "Detection Method"
+    $DetectionTarget = Get-CatalogValue -Row $CatalogRow -ColumnName "Detection Target"
+
+    $Commands = New-Object System.Collections.Generic.List[string]
+    $CommonPaths = New-Object System.Collections.Generic.List[string]
+    $Services = New-Object System.Collections.Generic.List[string]
+
+    $Candidates = Split-DetectionCandidates -DetectionTarget $DetectionTarget
+
+    foreach ($Candidate in $Candidates) {
+        $CleanCandidate = $Candidate.Trim()
+
+        if ([string]::IsNullOrWhiteSpace($CleanCandidate)) {
+            continue
+        }
+
+        if ($DetectionMethod -match "Command") {
+            if ($CleanCandidate -match "^[A-Za-z0-9_.+\-\*]+(\.exe)?$") {
+                $Commands.Add(($CleanCandidate -replace "\.exe$", "")) | Out-Null
+            }
+        }
+
+        if ($CleanCandidate -match "\.exe$") {
+            $ExeName = Split-Path $CleanCandidate -Leaf
+            $CommandName = $ExeName -replace "\.exe$", ""
+
+            if ($CommandName) {
+                $Commands.Add($CommandName) | Out-Null
+            }
+
+            $CommonPaths.Add((Join-Path $env:ProgramFiles "*\$ExeName")) | Out-Null
+
+            if (${env:ProgramFiles(x86)}) {
+                $CommonPaths.Add((Join-Path ${env:ProgramFiles(x86)} "*\$ExeName")) | Out-Null
+            }
+
+            if ($env:LOCALAPPDATA) {
+                $CommonPaths.Add((Join-Path $env:LOCALAPPDATA "Programs\*\$ExeName")) | Out-Null
+            }
+        }
+
+        if ($DetectionMethod -match "Service") {
+            if ($CleanCandidate -match "(?i)^(.+?)\s+service$") {
+                $Services.Add($Matches[1].Trim()) | Out-Null
+            }
+            elseif ($CleanCandidate -match "^[A-Za-z0-9_.\-]+$") {
+                $Services.Add($CleanCandidate) | Out-Null
+            }
+        }
+    }
+
+    $DisplayNamePatterns = Get-DisplayNamePatterns -SoftwareName $SoftwareName -DetectionTarget $DetectionTarget
+
+    [pscustomobject]@{
+        Commands = @($Commands | Sort-Object -Unique)
+        DisplayNamePatterns = @($DisplayNamePatterns | Sort-Object -Unique)
+        CommonPaths = @($CommonPaths | Sort-Object -Unique)
+        Services = @($Services | Sort-Object -Unique)
+    }
 }
 
 Write-Host "=======================================" -ForegroundColor Gray
@@ -364,213 +686,77 @@ catch {
 }
 
 # Software Checks
-Write-Section -Title "SOFTWARE - CORE TOOLS"
+Write-Section -Title "SOFTWARE"
 
-$ProgramFilesX86 = ${env:ProgramFiles(x86)}
+$CatalogFolder = Join-Path $ProjectRoot "catalog"
+$CatalogFile = Join-Path $CatalogFolder "arcforge-software-catalog.csv"
 
-$CoreTools = @(
-    @{
-        Name = "Git"
-        Commands = @("git")
-        DisplayNamePatterns = @("Git*")
-        CommonPaths = @(
-            "$env:ProgramFiles\Git\cmd\git.exe"
-        )
-    },
-    @{
-        Name = "VS Code"
-        Commands = @("code")
-        DisplayNamePatterns = @("Microsoft Visual Studio Code*", "Visual Studio Code*")
-        CommonPaths = @(
-            "$env:LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe",
-            "$env:ProgramFiles\Microsoft VS Code\Code.exe"
-        )
-    },
-    @{
-        Name = "PowerShell 7"
-        Commands = @("pwsh")
-        DisplayNamePatterns = @("PowerShell 7*", "Microsoft PowerShell*")
-        CommonPaths = @(
-            "$env:ProgramFiles\PowerShell\7\pwsh.exe"
-        )
-    },
-    @{
-        Name = "Notepad++"
-        Commands = @("notepad++")
-        DisplayNamePatterns = @("Notepad++*")
-        CommonPaths = @(
-            "$env:ProgramFiles\Notepad++\notepad++.exe",
-            "$ProgramFilesX86\Notepad++\notepad++.exe"
-        )
-    }
-)
-
-foreach ($Tool in $CoreTools) {
-    $Installed = Test-SoftwareInstalled `
-        -Commands $Tool.Commands `
-        -DisplayNamePatterns $Tool.DisplayNamePatterns `
-        -CommonPaths $Tool.CommonPaths
-
-    if ($Installed) {
-        Write-Result -Status "OK" -Label "$($Tool.Name):" -Value "Installed"
-    }
-    else {
-        Write-Result -Status "WARN" -Label "$($Tool.Name):" -Value "Not found"
-    }
+if ($BattlestationProfile -eq "General") {
+    Write-Result -Status "OK" -Label "Profile Tools:" -Value "No profile-specific software checks for General profile" -CountResult:$false
 }
-
-Write-Section -Title "SOFTWARE - DEV/GAME"
-
-$GameDevTools = @(
-    @{
-        Name = "Python"
-        Commands = @("python", "py")
-        DisplayNamePatterns = @("Python*")
-        CommonPaths = @(
-            "$env:LOCALAPPDATA\Programs\Python\Python*\python.exe",
-            "$env:ProgramFiles\Python*\python.exe"
-        )
-    },
-    @{
-        Name = "Visual Studio"
-        Commands = @("devenv")
-        DisplayNamePatterns = @("Microsoft Visual Studio*")
-        CommonPaths = @(
-            "$env:ProgramFiles\Microsoft Visual Studio\2022\Community\Common7\IDE\devenv.exe",
-            "$env:ProgramFiles\Microsoft Visual Studio\2022\Professional\Common7\IDE\devenv.exe",
-            "$env:ProgramFiles\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\devenv.exe"
-        )
-    },
-    @{
-        Name = "Perforce"
-        Commands = @("p4", "p4v")
-        DisplayNamePatterns = @("Perforce*", "Helix*")
-        CommonPaths = @(
-            "$env:ProgramFiles\Perforce\p4.exe",
-            "$env:ProgramFiles\Perforce\p4v.exe",
-            "$ProgramFilesX86\Perforce\p4.exe",
-            "$ProgramFilesX86\Perforce\p4v.exe"
-        )
-    },
-    @{
-        Name = "Unreal Engine"
-        Commands = @()
-        DisplayNamePatterns = @("Unreal Engine*", "Epic Games Launcher*")
-        CommonPaths = @(
-            "$env:ProgramFiles\Epic Games\UE_*",
-            "$env:ProgramFiles\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe"
-        )
-    }
-)
-
-foreach ($Tool in $GameDevTools) {
-    $Installed = Test-SoftwareInstalled `
-        -Commands $Tool.Commands `
-        -DisplayNamePatterns $Tool.DisplayNamePatterns `
-        -CommonPaths $Tool.CommonPaths
-
-    if ($Installed) {
-        Write-Result -Status "OK" -Label "$($Tool.Name):" -Value "Installed"
-    }
-    else {
-        Write-Result -Status "WARN" -Label "$($Tool.Name):" -Value "Not found"
-    }
+elseif (-not (Test-Path $CatalogFile)) {
+    Write-Result -Status "WARN" -Label "Catalog File:" -Value "Not found at $CatalogFile"
+    Write-Result -Status "WARN" -Label "Profile Tools:" -Value "Unable to run catalog-based software checks for $BattlestationProfile"
 }
+else {
+    try {
+        $SoftwareCatalog = Import-Csv -Path $CatalogFile
 
-Write-Section -Title "SOFTWARE - CREATOR/ART"
+        $SelectedSoftwareTools = @(
+            $SoftwareCatalog | Where-Object {
+                (Test-YesValue (Get-CatalogValue -Row $_ -ColumnName $BattlestationProfile)) -and
+                ((Get-CatalogValue -Row $_ -ColumnName "Priority") -eq "Recommended")
+            }
+        )
 
-$ArtPipelineTools = @(
-    @{
-        Name = "Blender"
-        Commands = @("blender")
-        DisplayNamePatterns = @("Blender*")
-        CommonPaths = @(
-            "$env:ProgramFiles\Blender Foundation\Blender*\blender.exe"
-        )
-    },
-    @{
-        Name = "Maya"
-        Commands = @("maya")
-        DisplayNamePatterns = @("Autodesk Maya*")
-        CommonPaths = @(
-            "$env:ProgramFiles\Autodesk\Maya*\bin\maya.exe"
-        )
-    },
-    @{
-        Name = "Houdini"
-        Commands = @("houdini")
-        DisplayNamePatterns = @("Houdini*", "SideFX Houdini*")
-        CommonPaths = @(
-            "$env:ProgramFiles\Side Effects Software\Houdini*\bin\houdini.exe"
-        )
-    },
-    @{
-        Name = "ZBrush"
-        Commands = @()
-        DisplayNamePatterns = @("ZBrush*", "Maxon ZBrush*")
-        CommonPaths = @(
-            "$env:ProgramFiles\Maxon ZBrush*\ZBrush.exe",
-            "$env:ProgramFiles\Pixologic\ZBrush*\ZBrush.exe"
-        )
+        if (-not $SelectedSoftwareTools -or $SelectedSoftwareTools.Count -eq 0) {
+            Write-Result -Status "OK" -Label "Profile Tools:" -Value "No recommended software checks for $BattlestationProfile profile" -CountResult:$false
+        }
+        else {
+            Write-Result -Status "OK" -Label "Profile Tools:" -Value "$($SelectedSoftwareTools.Count) recommended software check(s) selected for $BattlestationProfile" -CountResult:$false
+
+            $SoftwareCategories = @(
+                $SelectedSoftwareTools |
+                    Select-Object -ExpandProperty Category -Unique |
+                    Sort-Object
+            )
+
+            foreach ($Category in $SoftwareCategories) {
+                $CategoryTools = @($SelectedSoftwareTools | Where-Object { $_.Category -eq $Category })
+
+                if (-not $CategoryTools -or $CategoryTools.Count -eq 0) {
+                    continue
+                }
+
+                Add-ReportLine
+                Add-ReportLine -Line "[$Category]"
+                Write-Host ""
+                Write-Host "[$Category]" -ForegroundColor Gray
+
+                foreach ($Tool in $CategoryTools) {
+                    $ToolName = Get-CatalogValue -Row $Tool -ColumnName "Software Name"
+                    $DetectionConfig = Get-SoftwareDetectionConfig -CatalogRow $Tool
+
+                    $Installed = Test-SoftwareInstalled `
+                        -SoftwareName $Tool."Software Name" `
+                        -Commands $Commands `
+                        -DisplayNamePatterns $DisplayNamePatterns `
+                        -CommonPaths $CommonPaths `
+                        -Services $Services
+
+                    if ($Installed) {
+                        Write-Result -Status "OK" -Label "$($ToolName):" -Value "Installed"
+                    }
+                    else {
+                        Write-Result -Status "WARN" -Label "$($ToolName):" -Value "Recommended for $BattlestationProfile profile but not found"
+                    }
+                }
+            }
+        }
     }
-)
-
-foreach ($Tool in $ArtPipelineTools) {
-    $Installed = Test-SoftwareInstalled `
-        -Commands $Tool.Commands `
-        -DisplayNamePatterns $Tool.DisplayNamePatterns `
-        -CommonPaths $Tool.CommonPaths
-
-    if ($Installed) {
-        Write-Result -Status "OK" -Label "$($Tool.Name):" -Value "Installed"
-    }
-    else {
-        Write-Result -Status "WARN" -Label "$($Tool.Name):" -Value "Not found"
-    }
-}
-
-Write-Section -Title "SOFTWARE - GAMING/LAUNCHERS"
-
-$LauncherQATools = @(
-    @{
-        Name = "Riot Client"
-        Commands = @()
-        DisplayNamePatterns = @("Riot Client*", "Riot Games*")
-        CommonPaths = @(
-            "C:\Riot Games\Riot Client\RiotClientServices.exe"
-        )
-    },
-    @{
-        Name = "Steam"
-        Commands = @("steam")
-        DisplayNamePatterns = @("Steam*")
-        CommonPaths = @(
-            "$ProgramFilesX86\Steam\steam.exe",
-            "$env:ProgramFiles\Steam\steam.exe"
-        )
-    },
-    @{
-        Name = "Epic Launcher"
-        Commands = @()
-        DisplayNamePatterns = @("Epic Games Launcher*")
-        CommonPaths = @(
-            "$env:ProgramFiles\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe",
-            "$ProgramFilesX86\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe"
-        )
-    }
-)
-
-foreach ($Tool in $LauncherQATools) {
-    $Installed = Test-SoftwareInstalled `
-        -Commands $Tool.Commands `
-        -DisplayNamePatterns $Tool.DisplayNamePatterns `
-        -CommonPaths $Tool.CommonPaths
-
-    if ($Installed) {
-        Write-Result -Status "OK" -Label "$($Tool.Name):" -Value "Installed"
-    }
-    else {
-        Write-Result -Status "WARN" -Label "$($Tool.Name):" -Value "Not found"
+    catch {
+        Write-Result -Status "WARN" -Label "Catalog File:" -Value "Unable to read $CatalogFile"
+        Write-Result -Status "WARN" -Label "Catalog Error:" -Value $_.Exception.Message
     }
 }
 
