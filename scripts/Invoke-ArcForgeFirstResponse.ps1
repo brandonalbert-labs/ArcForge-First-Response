@@ -1,5 +1,5 @@
 # ArcForge First Response
-# ArcForge First Response Report v0.14
+# ArcForge First Response Report v0.16
 
 param (
     [ValidateSet("General", "Gaming", "Creator", "Developer", "Homelab", "Secure")]
@@ -584,9 +584,121 @@ function New-ArcForgeHtmlReport {
         }) -join "`n"
     }
 
+    function Get-ArcForgeFlattenedLines {
+        param (
+            [object[]]$Lines
+        )
+
+        return @(
+            foreach ($Line in $Lines) {
+                if ($null -eq $Line) {
+                    continue
+                }
+
+                if ($Line -is [System.Collections.IEnumerable] -and $Line -isnot [string]) {
+                    foreach ($Item in $Line) {
+                        if ($null -ne $Item) {
+                            [string]$Item
+                        }
+                    }
+                }
+                else {
+                    [string]$Line
+                }
+            }
+        )
+    }
+
+    function Get-ArcForgeSectionReadiness {
+        param (
+            [string]$Name,
+            [object[]]$Lines
+        )
+
+        $FlattenedLines = Get-ArcForgeFlattenedLines -Lines $Lines
+
+        $OkCount = @($FlattenedLines | Where-Object { $_ -match '^\[OK\]' }).Count
+        $WarnCount = @($FlattenedLines | Where-Object { $_ -match '^\[WARN\]' }).Count
+        $FailCount = @($FlattenedLines | Where-Object { $_ -match '^\[FAIL\]' }).Count
+
+        if ($FailCount -gt 0) {
+            $Status = "Critical"
+            $StatusClass = "readiness-critical"
+            $Summary = "Critical findings require attention."
+        }
+        elseif ($WarnCount -gt 0) {
+            $Status = "Attention"
+            $StatusClass = "readiness-attention"
+            $Summary = "Warnings found. Review recommended actions."
+        }
+        elseif ($OkCount -gt 0) {
+            $Status = "OK"
+            $StatusClass = "readiness-ok"
+            $Summary = "All checks passed."
+        }
+        else {
+            $Status = "No Data"
+            $StatusClass = "readiness-neutral"
+            $Summary = "No findings detected in this section."
+        }
+
+        [pscustomobject]@{
+            Name        = $Name
+            Status      = $Status
+            StatusClass = $StatusClass
+            OkCount     = $OkCount
+            WarnCount   = $WarnCount
+            FailCount   = $FailCount
+            Summary     = $Summary
+        }
+    }
+
+    function New-ArcForgeReadinessOverviewHtml {
+        param (
+            [object[]]$ReadinessCards
+        )
+
+        $CardBlocks = @()
+
+        foreach ($Card in $ReadinessCards) {
+            $SafeName = ConvertTo-HtmlSafeText $Card.Name
+            $SafeStatus = ConvertTo-HtmlSafeText $Card.Status
+            $SafeSummary = ConvertTo-HtmlSafeText $Card.Summary
+
+            $CardBlocks += @"
+            <article class="readiness-card $($Card.StatusClass)">
+                <div class="readiness-card-header">
+                    <h3>$SafeName</h3>
+                    <span class="readiness-status">$SafeStatus</span>
+                </div>
+                <div class="readiness-counts">
+                    <span><strong>$($Card.OkCount)</strong> OK</span>
+                    <span><strong>$($Card.WarnCount)</strong> WARN</span>
+                    <span><strong>$($Card.FailCount)</strong> FAIL</span>
+                </div>
+                <p>$SafeSummary</p>
+            </article>
+"@
+        }
+
+        $CardsHtml = $CardBlocks -join "`n"
+
+        return @"
+        <section class="card section">
+            <div class="section-title">
+                <h2>Readiness Overview</h2>
+                <p>Dashboard-style summary of major battlestation readiness areas.</p>
+            </div>
+            <div class="readiness-grid">
+$CardsHtml
+            </div>
+        </section>
+"@
+    }
+
     $ReportSections = Get-ArcForgeReportSections -ReportLines $ReportLines
 
-    $SystemFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines @(
+    $SystemLines = @(
         $ReportSections["SYSTEM"]
         $ReportSections["UPTIME"]
         $ReportSections["PROCESSES"]
@@ -594,10 +706,24 @@ function New-ArcForgeHtmlReport {
         $ReportSections["STORAGE"]
     )
 
-    $NetworkFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $ReportSections["NETWORK"]
-    $SoftwareFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $ReportSections["SOFTWARE"]
-    $SecurityFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $ReportSections["SECURITY"]
-    $UpdatesFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $ReportSections["UPDATES"]
+    $NetworkLines = $ReportSections["NETWORK"]
+    $SoftwareLines = $ReportSections["SOFTWARE"]
+    $SecurityLines = $ReportSections["SECURITY"]
+    $UpdatesLines = $ReportSections["UPDATES"]
+
+    $SystemFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $SystemLines
+    $NetworkFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $NetworkLines
+    $SoftwareFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $SoftwareLines
+    $SecurityFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $SecurityLines
+    $UpdatesFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $UpdatesLines
+
+    $ReadinessOverviewHtml = New-ArcForgeReadinessOverviewHtml -ReadinessCards @(
+        Get-ArcForgeSectionReadiness -Name "System" -Lines $SystemLines
+        Get-ArcForgeSectionReadiness -Name "Network" -Lines $NetworkLines
+        Get-ArcForgeSectionReadiness -Name "Software" -Lines $SoftwareLines
+        Get-ArcForgeSectionReadiness -Name "Security" -Lines $SecurityLines
+        Get-ArcForgeSectionReadiness -Name "Updates" -Lines $UpdatesLines
+    )
 
     $OkCount = $CheckCounts.OK
     $WarnCount = $CheckCounts.WARN
@@ -795,6 +921,120 @@ function New-ArcForgeHtmlReport {
             margin-bottom: 20px;
         }
 
+        .section-title {
+            margin-bottom: 16px;
+        }
+
+        .section-title h2 {
+            margin-bottom: 4px;
+        }
+
+        .section-title p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        .readiness-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 14px;
+        }
+
+        .readiness-card {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px;
+        }
+
+        .readiness-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .readiness-card h3 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .readiness-status {
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .readiness-counts {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .readiness-counts span {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--muted);
+            font-size: 12px;
+            padding: 8px;
+            text-align: center;
+        }
+
+        .readiness-counts strong {
+            display: block;
+            color: var(--text);
+            font-size: 17px;
+        }
+
+        .readiness-card p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .readiness-ok {
+            border-color: rgba(31, 143, 77, 0.45);
+        }
+
+        .readiness-ok .readiness-status {
+            background: rgba(31, 143, 77, 0.12);
+            color: var(--ok);
+        }
+
+        .readiness-attention {
+            border-color: rgba(183, 121, 31, 0.45);
+        }
+
+        .readiness-attention .readiness-status {
+            background: rgba(183, 121, 31, 0.12);
+            color: var(--warn);
+        }
+
+        .readiness-critical {
+            border-color: rgba(197, 48, 48, 0.45);
+        }
+
+        .readiness-critical .readiness-status {
+            background: rgba(197, 48, 48, 0.12);
+            color: var(--fail);
+        }
+
+        .readiness-neutral {
+            border-color: rgba(101, 117, 139, 0.35);
+        }
+
+        .readiness-neutral .readiness-status {
+            background: rgba(101, 117, 139, 0.12);
+            color: var(--muted);
+        }
+
         ul {
             margin: 0;
             padding-left: 22px;
@@ -904,6 +1144,8 @@ function New-ArcForgeHtmlReport {
                 <span class="count-pill count-fail">FAIL: $FailCount</span>
             </div>
         </section>
+
+$ReadinessOverviewHtml
 
         <section class="card section">
             <h2>System</h2>
