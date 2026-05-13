@@ -479,6 +479,51 @@ function Get-SoftwareDetectionConfig {
     }
 }
 
+
+function Get-ArcForgeReportSections {
+    param (
+        [string[]]$ReportLines
+    )
+
+    $KnownSections = @(
+        "SYSTEM",
+        "UPTIME",
+        "PROCESSES",
+        "SERVICES",
+        "STORAGE",
+        "NETWORK",
+        "SOFTWARE",
+        "SECURITY",
+        "UPDATES",
+        "SUMMARY"
+    )
+
+    $Sections = @{}
+
+    foreach ($Section in $KnownSections) {
+        $Sections[$Section] = [System.Collections.Generic.List[string]]::new()
+    }
+
+    $CurrentSection = $null
+
+    foreach ($Line in $ReportLines) {
+        if ($Line -match '^\[(?<Section>[^\]]+)\]\s*$') {
+            $CandidateSection = $Matches.Section.Trim().ToUpperInvariant()
+
+            if ($KnownSections -contains $CandidateSection) {
+                $CurrentSection = $CandidateSection
+                continue
+            }
+        }
+
+        if ($CurrentSection -and -not [string]::IsNullOrWhiteSpace($Line)) {
+            $Sections[$CurrentSection].Add($Line) | Out-Null
+        }
+    }
+
+    return $Sections
+}
+
 function New-ArcForgeHtmlReport {
     param (
         [string]$OutputPath,
@@ -498,6 +543,61 @@ function New-ArcForgeHtmlReport {
 
         return [System.Net.WebUtility]::HtmlEncode($Text)
     }
+
+    function ConvertTo-ArcForgeHtmlFindingList {
+        param (
+            [object[]]$Lines,
+            [string]$EmptyMessage = "No findings captured for this section. See Raw Findings for the complete report output."
+        )
+
+        $FlattenedLines = @(
+            foreach ($Line in $Lines) {
+                if ($null -eq $Line) {
+                    continue
+                }
+
+                if ($Line -is [System.Collections.IEnumerable] -and $Line -isnot [string]) {
+                    foreach ($Item in $Line) {
+                        if ($null -ne $Item) {
+                            [string]$Item
+                        }
+                    }
+                }
+                else {
+                    [string]$Line
+                }
+            }
+        )
+
+        $CleanLines = @(
+            $FlattenedLines |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                ForEach-Object { ConvertTo-HtmlSafeText $_ }
+        )
+
+        if (-not $CleanLines -or $CleanLines.Count -eq 0) {
+            return "<li class=`"muted`">$(ConvertTo-HtmlSafeText $EmptyMessage)</li>"
+        }
+
+        return ($CleanLines | ForEach-Object {
+            "<li><code>$_</code></li>"
+        }) -join "`n"
+    }
+
+    $ReportSections = Get-ArcForgeReportSections -ReportLines $ReportLines
+
+    $SystemFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines @(
+        $ReportSections["SYSTEM"]
+        $ReportSections["UPTIME"]
+        $ReportSections["PROCESSES"]
+        $ReportSections["SERVICES"]
+        $ReportSections["STORAGE"]
+    )
+
+    $NetworkFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $ReportSections["NETWORK"]
+    $SoftwareFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $ReportSections["SOFTWARE"]
+    $SecurityFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $ReportSections["SECURITY"]
+    $UpdatesFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $ReportSections["UPDATES"]
 
     $OkCount = $CheckCounts.OK
     $WarnCount = $CheckCounts.WARN
@@ -807,27 +907,37 @@ function New-ArcForgeHtmlReport {
 
         <section class="card section">
             <h2>System</h2>
-            <p class="muted">See Raw Findings for detailed system, uptime, process, service, and storage results.</p>
+            <ul>
+                $SystemFindingsHtml
+            </ul>
         </section>
 
         <section class="card section">
             <h2>Network</h2>
-            <p class="muted">See Raw Findings for IP configuration, gateway, internet reachability, and DNS results.</p>
+            <ul>
+                $NetworkFindingsHtml
+            </ul>
         </section>
 
         <section class="card section">
             <h2>Software Readiness</h2>
-            <p class="muted">See Raw Findings for profile-aware software checks from the ArcForge Software Catalog.</p>
+            <ul>
+                $SoftwareFindingsHtml
+            </ul>
         </section>
 
         <section class="card section">
             <h2>Security</h2>
-            <p class="muted">See Raw Findings for firewall, antivirus, and local administrator review results.</p>
+            <ul>
+                $SecurityFindingsHtml
+            </ul>
         </section>
 
         <section class="card section">
             <h2>Updates</h2>
-            <p class="muted">See Raw Findings for Windows Update readiness, pending reboot, and latest hotfix results.</p>
+            <ul>
+                $UpdatesFindingsHtml
+            </ul>
         </section>
 
         <section class="card section">
