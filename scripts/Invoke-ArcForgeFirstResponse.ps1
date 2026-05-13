@@ -1,5 +1,5 @@
 # ArcForge First Response
-# ArcForge First Response Report v0.13
+# ArcForge First Response Report v0.14
 
 param (
     [ValidateSet("General", "Gaming", "Creator", "Developer", "Homelab", "Secure")]
@@ -15,13 +15,16 @@ $ReportFolder = Join-Path $ProjectRoot "reports"
 $Timestamp = Get-Date -Format "yyyy-MM-dd-HHmmss"
 $ProfileNameForFile = $BattlestationProfile.ToLower()
 $ReportFile = Join-Path $ReportFolder "$ComputerName-$ProfileNameForFile-first-response-$Timestamp.txt"
-$ReportLines = New-Object System.Collections.Generic.List[string]
+$HtmlReportFile = Join-Path $ReportFolder "$ComputerName-$ProfileNameForFile-first-response-$Timestamp.html"
+$ReportId = "AFR-$ComputerName-$ProfileNameForFile-$Timestamp"
 
 $CheckCounts = @{
     OK = 0
     WARN = 0
     FAIL = 0
 }
+
+$script:ReportLines = [System.Collections.Generic.List[string]]::new()
 
 if (-not (Test-Path $ReportFolder)) {
     New-Item -Path $ReportFolder -ItemType Directory | Out-Null
@@ -476,6 +479,376 @@ function Get-SoftwareDetectionConfig {
     }
 }
 
+function New-ArcForgeHtmlReport {
+    param (
+        [string]$OutputPath,
+        [string]$ReportId,
+        [string]$ComputerName,
+        [string]$CurrentUser,
+        [string]$BattlestationProfile,
+        [datetime]$GeneratedAt,
+        [hashtable]$CheckCounts,
+        [string[]]$ReportLines
+    )
+
+    function ConvertTo-HtmlSafeText {
+        param (
+            [string]$Text
+        )
+
+        return [System.Net.WebUtility]::HtmlEncode($Text)
+    }
+
+    $OkCount = $CheckCounts.OK
+    $WarnCount = $CheckCounts.WARN
+    $FailCount = $CheckCounts.FAIL
+    $TotalChecks = $OkCount + $WarnCount + $FailCount
+
+    if ($FailCount -gt 0) {
+        $OverallStatus = "Action Required"
+        $StatusClass = "status-fail"
+    }
+    elseif ($WarnCount -gt 0) {
+        $OverallStatus = "Attention Recommended"
+        $StatusClass = "status-warn"
+    }
+    else {
+        $OverallStatus = "Healthy"
+        $StatusClass = "status-ok"
+    }
+
+    $RecommendedActions = @(
+        $ReportLines |
+            Where-Object {
+                $_ -match "^\[(WARN|FAIL)\]" -and
+                $_ -notmatch "^\[(WARN|FAIL)\]\s+Warnings:" -and
+                $_ -notmatch "^\[(WARN|FAIL)\]\s+Failures:" -and
+                $_ -notmatch "^\[(WARN|FAIL)\]\s+Overall Status:"
+            } |
+            ForEach-Object { ConvertTo-HtmlSafeText $_ }
+    )
+
+    if (-not $RecommendedActions -or $RecommendedActions.Count -eq 0) {
+        $RecommendedActionsHtml = "<li>No immediate recommended actions. System appears healthy based on current checks.</li>"
+    }
+    else {
+        $RecommendedActionsHtml = ($RecommendedActions | ForEach-Object {
+            "<li><code>$_</code></li>"
+        }) -join "`n"
+    }
+
+    $RawFindings = ConvertTo-HtmlSafeText ($ReportLines -join "`r`n")
+
+    $Html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ArcForge First Response Report - $(ConvertTo-HtmlSafeText $ReportId)</title>
+    <style>
+        :root {
+            --bg: #f4f6f8;
+            --panel: #ffffff;
+            --border: #d9dee5;
+            --text: #1f2933;
+            --muted: #65758b;
+            --ok: #1f8f4d;
+            --warn: #b7791f;
+            --fail: #c53030;
+            --header: #111827;
+            --chip: #eef2f7;
+        }
+
+        body {
+            margin: 0;
+            padding: 32px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Segoe UI", Arial, sans-serif;
+            line-height: 1.5;
+        }
+
+        .report-shell {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .ticket-header {
+            background: var(--header);
+            color: white;
+            border-radius: 14px;
+            padding: 24px 28px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+        }
+
+        .eyebrow {
+            color: #aeb8c7;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 6px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .subtitle {
+            margin-top: 8px;
+            color: #d6dce8;
+        }
+
+        .status-row {
+            margin-top: 18px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 7px 13px;
+            font-weight: 700;
+            font-size: 13px;
+        }
+
+        .status-ok {
+            background: rgba(31, 143, 77, 0.16);
+            color: #b7f7d1;
+            border: 1px solid rgba(183, 247, 209, 0.35);
+        }
+
+        .status-warn {
+            background: rgba(183, 121, 31, 0.18);
+            color: #ffe0a3;
+            border: 1px solid rgba(255, 224, 163, 0.35);
+        }
+
+        .status-fail {
+            background: rgba(197, 48, 48, 0.18);
+            color: #ffc0c0;
+            border: 1px solid rgba(255, 192, 192, 0.35);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+        }
+
+        .card h2 {
+            margin: 0 0 12px 0;
+            font-size: 17px;
+        }
+
+        .meta-label {
+            color: var(--muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 4px;
+        }
+
+        .meta-value {
+            font-weight: 650;
+            word-break: break-word;
+        }
+
+        .summary-counts {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .count-pill {
+            background: var(--chip);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: 7px 12px;
+            font-weight: 650;
+            font-size: 13px;
+        }
+
+        .count-ok {
+            color: var(--ok);
+        }
+
+        .count-warn {
+            color: var(--warn);
+        }
+
+        .count-fail {
+            color: var(--fail);
+        }
+
+        .section {
+            margin-bottom: 20px;
+        }
+
+        ul {
+            margin: 0;
+            padding-left: 22px;
+        }
+
+        li {
+            margin: 8px 0;
+        }
+
+        code {
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 2px 5px;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 13px;
+        }
+
+        pre {
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #0f172a;
+            color: #e5e7eb;
+            border-radius: 12px;
+            padding: 18px;
+            overflow-x: auto;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 13px;
+        }
+
+        .muted {
+            color: var(--muted);
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 16px;
+            }
+
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="report-shell">
+        <header class="ticket-header">
+            <div class="eyebrow">ArcForge First Response</div>
+            <h1>First Response Report</h1>
+            <div class="subtitle">Static triage record generated from local workstation readiness checks.</div>
+            <div class="status-row">
+                <span class="status-badge $StatusClass">$OverallStatus</span>
+            </div>
+        </header>
+
+        <section class="grid">
+            <div class="card">
+                <div class="meta-label">Report ID</div>
+                <div class="meta-value">$(ConvertTo-HtmlSafeText $ReportId)</div>
+            </div>
+            <div class="card">
+                <div class="meta-label">Generated At</div>
+                <div class="meta-value">$(ConvertTo-HtmlSafeText $GeneratedAt)</div>
+            </div>
+            <div class="card">
+                <div class="meta-label">Computer</div>
+                <div class="meta-value">$(ConvertTo-HtmlSafeText $ComputerName)</div>
+            </div>
+            <div class="card">
+                <div class="meta-label">Current User</div>
+                <div class="meta-value">$(ConvertTo-HtmlSafeText $CurrentUser)</div>
+            </div>
+            <div class="card">
+                <div class="meta-label">Battlestation Profile</div>
+                <div class="meta-value">$(ConvertTo-HtmlSafeText $BattlestationProfile)</div>
+            </div>
+            <div class="card">
+                <div class="meta-label">Overall Status</div>
+                <div class="meta-value">$OverallStatus</div>
+            </div>
+            <div class="card">
+                <div class="meta-label">Total Checks</div>
+                <div class="meta-value">$TotalChecks</div>
+            </div>
+            <div class="card">
+                <div class="meta-label">Report Type</div>
+                <div class="meta-value">First Response Triage</div>
+            </div>
+        </section>
+
+        <section class="card section">
+            <h2>Incident Summary</h2>
+            <p class="muted">
+                ArcForge First Response completed a local workstation readiness check using the
+                <strong>$(ConvertTo-HtmlSafeText $BattlestationProfile)</strong> Battlestation Profile.
+            </p>
+            <div class="summary-counts">
+                <span class="count-pill count-ok">OK: $OkCount</span>
+                <span class="count-pill count-warn">WARN: $WarnCount</span>
+                <span class="count-pill count-fail">FAIL: $FailCount</span>
+            </div>
+        </section>
+
+        <section class="card section">
+            <h2>System</h2>
+            <p class="muted">See Raw Findings for detailed system, uptime, process, service, and storage results.</p>
+        </section>
+
+        <section class="card section">
+            <h2>Network</h2>
+            <p class="muted">See Raw Findings for IP configuration, gateway, internet reachability, and DNS results.</p>
+        </section>
+
+        <section class="card section">
+            <h2>Software Readiness</h2>
+            <p class="muted">See Raw Findings for profile-aware software checks from the ArcForge Software Catalog.</p>
+        </section>
+
+        <section class="card section">
+            <h2>Security</h2>
+            <p class="muted">See Raw Findings for firewall, antivirus, and local administrator review results.</p>
+        </section>
+
+        <section class="card section">
+            <h2>Updates</h2>
+            <p class="muted">See Raw Findings for Windows Update readiness, pending reboot, and latest hotfix results.</p>
+        </section>
+
+        <section class="card section">
+            <h2>Recommended Actions</h2>
+            <ul>
+                $RecommendedActionsHtml
+            </ul>
+        </section>
+
+        <section class="card section">
+            <h2>Raw Findings</h2>
+            <pre>$RawFindings</pre>
+        </section>
+    </main>
+</body>
+</html>
+"@
+
+    $Html | Out-File -FilePath $OutputPath -Encoding UTF8
+}
+
 Write-Host "=========================" -ForegroundColor Gray
 Write-Host " ArcForge First Response" -ForegroundColor Gray
 Write-Host "=========================" -ForegroundColor Gray
@@ -739,10 +1112,10 @@ else {
 
                     $Installed = Test-SoftwareInstalled `
                         -SoftwareName $Tool."Software Name" `
-                        -Commands $Commands `
-                        -DisplayNamePatterns $DisplayNamePatterns `
-                        -CommonPaths $CommonPaths `
-                        -Services $Services
+                        -Commands $DetectionConfig.Commands `
+                        -DisplayNamePatterns $DetectionConfig.DisplayNamePatterns `
+                        -CommonPaths $DetectionConfig.CommonPaths `
+                        -Services $DetectionConfig.Services
 
                     if ($Installed) {
                         Write-Result -Status "OK" -Label "$($ToolName):" -Value "Installed"
@@ -914,10 +1287,22 @@ Write-Summary
 
 Write-Host ""
 Write-Host "Health check complete." -ForegroundColor Gray
-Write-Host "Report saved to: $ReportFile" -ForegroundColor Gray
+Write-Host "TXT report saved to: $ReportFile" -ForegroundColor Gray
+Write-Host "HTML report saved to: $HtmlReportFile" -ForegroundColor Gray
 
 Add-ReportLine
 Add-ReportLine -Line "Health check complete."
-Add-ReportLine -Line "Report saved to: $ReportFile"
+Add-ReportLine -Line "TXT report saved to: $ReportFile"
+Add-ReportLine -Line "HTML report saved to: $HtmlReportFile"
 
 $ReportLines | Out-File -FilePath $ReportFile -Encoding UTF8
+
+New-ArcForgeHtmlReport `
+    -OutputPath $HtmlReportFile `
+    -ReportId $ReportId `
+    -ComputerName $ComputerName `
+    -CurrentUser $CurrentUser `
+    -BattlestationProfile $BattlestationProfile `
+    -GeneratedAt $ReportDate `
+    -CheckCounts $CheckCounts `
+    -ReportLines $ReportLines
