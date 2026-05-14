@@ -1262,18 +1262,86 @@ $GroupsHtml
 "@
     }
 
+    # Builds the three compact status segments shown beside readiness-domain
+    # links in the HTML report sidebar.
+    #
+    # Why this exists:
+    # - v0.19 is still a presentation-layer release.
+    # - The sidebar segments give the report a quick dashboard-style glance
+    #   without adding JavaScript, external dependencies, or a new GUI layer.
+    # - This helper only converts an existing readiness status into small HTML
+    #   spans. It does not inspect the computer or rerun any health checks.
+    #
+    # Input:
+    # - A readiness status from Get-ArcForgeSectionReadiness:
+    #   Critical, Attention, OK, or No Data.
+    #
+    # Output:
+    # - A string containing three small <span> elements.
+    #
+    # Important:
+    # - This is presentation-only.
+    # - This does not change check logic, scoring, console output, or TXT output.
+    # - The sidebar status should always match the Readiness Overview card that
+    #   was built from the same readiness object.
+    function New-ArcForgeSidebarStatusSegmentsHtml {
+        param (
+            [string]$Status
+        )
+
+        $SegmentClass = "sidebar-segment-empty"
+        $FilledSegments = 0
+
+        switch ($Status) {
+            "Critical" {
+                $SegmentClass = "sidebar-segment-critical"
+                $FilledSegments = 1
+            }
+            "Attention" {
+                $SegmentClass = "sidebar-segment-attention"
+                $FilledSegments = 2
+            }
+            "OK" {
+                $SegmentClass = "sidebar-segment-ok"
+                $FilledSegments = 3
+            }
+            default {
+                $SegmentClass = "sidebar-segment-empty"
+                $FilledSegments = 0
+            }
+        }
+
+        $Segments = @()
+
+        for ($Index = 1; $Index -le 3; $Index++) {
+            if ($Index -le $FilledSegments) {
+                $Segments += "<span class=""sidebar-segment $SegmentClass""></span>"
+            }
+            else {
+                $Segments += "<span class=""sidebar-segment sidebar-segment-empty""></span>"
+            }
+        }
+
+        return ($Segments -join "")
+    }
+
     # Builds the static sidebar navigation used by the HTML report.
     #
     # Why this exists:
-    # - v0.18 is focused on presentation/readability only.
-    # - The report is getting long enough that quick-jump links make it easier
-    #   to move between the summary, readiness cards, detailed sections, actions,
-    #   and raw output.
+    # - v0.18 added quick-jump navigation for the major report sections.
+    # - v0.19 reuses the existing Readiness Overview data to add small status
+    #   segments beside the five primary readiness domains only.
     # - This helper keeps the navigation markup in one small place instead of
     #   scattering repeated <a> tags throughout the main HTML template.
     #
+    # Input:
+    # - ReadinessCards are the same objects used by New-ArcForgeReadinessOverviewHtml.
+    # - The cards are calculated once, then reused by both the Readiness Overview
+    #   and this sidebar navigation. That keeps both views in sync.
+    #
     # Important:
     # - These are normal internal anchor links like href="#network".
+    # - The status segments are visual/presentation-only.
     # - No JavaScript is used.
     # - No external dependencies are used.
     # - This does not change any check logic, console output, or TXT output.
@@ -1281,28 +1349,68 @@ $GroupsHtml
     # Troubleshooting rule:
     # - Every href="#section-name" in this helper must match an id="section-name"
     #   somewhere in the HTML template below.
-    # - Example: href="#report-summary" must match id="report-summary".
-    # - If a sidebar item appears but does not jump correctly, inspect this helper
-    #   and then inspect the matching HTML section ID.
+    # - Sidebar status segments should only appear for System, Network,
+    #   Software Readiness, Security, and Updates.
+    # - If a segment does not match the Readiness Overview card, inspect the
+    #   readiness card Name values first.
     #
     # Output:
     # - A string containing the complete sidebar <aside> block.
     function New-ArcForgeReportNavigationHtml {
+        param (
+            [object[]]$ReadinessCards
+        )
+
+        $ReadinessByName = @{}
+
+        foreach ($Card in $ReadinessCards) {
+            $ReadinessByName[$Card.Name] = $Card
+        }
+
+        $NavigationItems = @(
+            [pscustomobject]@{ Label = "Report Summary";       Anchor = "report-summary";       ShowStatus = $false }
+            [pscustomobject]@{ Label = "Incident Summary";     Anchor = "incident-summary";     ShowStatus = $false }
+            [pscustomobject]@{ Label = "Readiness Overview";   Anchor = "readiness-overview";   ShowStatus = $false }
+            [pscustomobject]@{ Label = "System";               Anchor = "system";               ShowStatus = $true  }
+            [pscustomobject]@{ Label = "Network";              Anchor = "network";              ShowStatus = $true  }
+            [pscustomobject]@{ Label = "Software Readiness";   Anchor = "software-readiness";   ShowStatus = $true  }
+            [pscustomobject]@{ Label = "Security";             Anchor = "security";             ShowStatus = $true  }
+            [pscustomobject]@{ Label = "Updates";              Anchor = "updates";              ShowStatus = $true  }
+            [pscustomobject]@{ Label = "Recommended Actions";  Anchor = "recommended-actions";  ShowStatus = $false }
+            [pscustomobject]@{ Label = "Raw Findings";         Anchor = "raw-findings";         ShowStatus = $false }
+        )
+
+        $NavigationLinks = @()
+
+        foreach ($Item in $NavigationItems) {
+            $SafeLabel = ConvertTo-HtmlSafeText $Item.Label
+            $SafeAnchor = ConvertTo-HtmlSafeText $Item.Anchor
+
+            if ($Item.ShowStatus -and $ReadinessByName.ContainsKey($Item.Label)) {
+                $Card = $ReadinessByName[$Item.Label]
+                $SafeStatus = ConvertTo-HtmlSafeText $Card.Status
+                $SegmentsHtml = New-ArcForgeSidebarStatusSegmentsHtml -Status $Card.Status
+
+                $NavigationLinks += @"
+                <a class="sidebar-link sidebar-link-with-status" href="#$SafeAnchor" title="$SafeLabel readiness: $SafeStatus" aria-label="$SafeLabel readiness: $SafeStatus">
+                    <span class="sidebar-link-label">$SafeLabel</span>
+                    <span class="sidebar-status-segments" aria-hidden="true">$SegmentsHtml</span>
+                </a>
+"@
+            }
+            else {
+                $NavigationLinks += "                <a class=""sidebar-link"" href=""#$SafeAnchor"">$SafeLabel</a>"
+            }
+        }
+
+        $NavigationLinksHtml = $NavigationLinks -join "`n"
+
         return @"
         <aside class="report-sidebar">
             <div class="sidebar-title">Report Navigation</div>
             <div class="sidebar-subtitle">Jump to a major report section.</div>
             <nav class="sidebar-nav" aria-label="ArcForge report sections">
-                <a class="sidebar-link" href="#report-summary">Report Summary</a>
-                <a class="sidebar-link" href="#incident-summary">Incident Summary</a>
-                <a class="sidebar-link" href="#readiness-overview">Readiness Overview</a>
-                <a class="sidebar-link" href="#system">System</a>
-                <a class="sidebar-link" href="#network">Network</a>
-                <a class="sidebar-link" href="#software-readiness">Software Readiness</a>
-                <a class="sidebar-link" href="#security">Security</a>
-                <a class="sidebar-link" href="#updates">Updates</a>
-                <a class="sidebar-link" href="#recommended-actions">Recommended Actions</a>
-                <a class="sidebar-link" href="#raw-findings">Raw Findings</a>
+$NavigationLinksHtml
             </nav>
         </aside>
 "@
@@ -1329,13 +1437,27 @@ $GroupsHtml
     $SecurityFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $SecurityLines
     $UpdatesFindingsHtml = ConvertTo-ArcForgeHtmlFindingList -Lines $UpdatesLines
 
-    $ReadinessOverviewHtml = New-ArcForgeReadinessOverviewHtml -ReadinessCards @(
+    # Build the shared readiness card data once.
+    #
+    # Why this exists:
+    # - The Readiness Overview cards and the v0.19 sidebar readiness segments
+    #   should describe the same five readiness domains.
+    # - Calculating these objects once prevents the sidebar and overview cards
+    #   from drifting out of sync later.
+    #
+    # Important:
+    # - This reuses the existing readiness helper.
+    # - This does not rerun health checks.
+    # - This does not change console output or TXT report output.
+    $ReadinessCards = @(
         Get-ArcForgeSectionReadiness -Name "System" -Lines $SystemLines
         Get-ArcForgeSectionReadiness -Name "Network" -Lines $NetworkLines
-        Get-ArcForgeSectionReadiness -Name "Software" -Lines $SoftwareLines
+        Get-ArcForgeSectionReadiness -Name "Software Readiness" -Lines $SoftwareLines
         Get-ArcForgeSectionReadiness -Name "Security" -Lines $SecurityLines
         Get-ArcForgeSectionReadiness -Name "Updates" -Lines $UpdatesLines
     )
+
+    $ReadinessOverviewHtml = New-ArcForgeReadinessOverviewHtml -ReadinessCards $ReadinessCards
 
     $OkCount = $CheckCounts.OK
     $WarnCount = $CheckCounts.WARN
@@ -1365,12 +1487,13 @@ $GroupsHtml
     $RecommendedActionItems = Get-ArcForgeActionItems -ReportLines $ReportLines -BattlestationProfile $BattlestationProfile
     $RecommendedActionsHtml = New-ArcForgeRecommendedActionsHtml -ActionItems $RecommendedActionItems
 
-    # Build the v0.18 static report navigation.
+    # Build the v0.19 static report navigation.
     #
     # This creates the sidebar HTML once, then the main template inserts it beside
-    # the report content. Keeping it as a variable makes the final HTML layout
-    # easier to read and avoids mixing navigation details into the report cards.
-    $ReportNavigationHtml = New-ArcForgeReportNavigationHtml
+    # the report content. The same readiness objects used by the Readiness Overview
+    # are passed in here so the sidebar can show compact presentation-only status
+    # segments without recalculating any checks.
+    $ReportNavigationHtml = New-ArcForgeReportNavigationHtml -ReadinessCards $ReadinessCards
 
     $RawFindings = ConvertTo-HtmlSafeText ($ReportLines -join "`r`n")
 
@@ -1466,6 +1589,59 @@ $GroupsHtml
         .sidebar-link:focus {
             background: var(--chip);
             border-color: var(--border);
+        }
+
+        /* v0.19 sidebar readiness segments.
+           Why this exists:
+           - These tiny segments make the sidebar act more like a static triage
+             dashboard while keeping the report local, self-contained, and simple.
+           - They are presentation-only and reuse the same readiness data shown in
+             the Readiness Overview cards.
+
+           Important:
+           - No JavaScript is involved.
+           - Empty segments are muted placeholders.
+           - Filled segments map to the existing readiness status:
+             Critical = 1 filled segment, Attention = 2, OK = 3, No Data = 0. */
+        .sidebar-link-with-status {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .sidebar-link-label {
+            min-width: 0;
+        }
+
+        .sidebar-status-segments {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            flex-shrink: 0;
+        }
+
+        .sidebar-segment {
+            width: 8px;
+            height: 14px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+
+        .sidebar-segment-empty {
+            background: #dbe2ea;
+        }
+
+        .sidebar-segment-ok {
+            background: var(--ok);
+        }
+
+        .sidebar-segment-attention {
+            background: var(--warn);
+        }
+
+        .sidebar-segment-critical {
+            background: var(--fail);
         }
 
         /* ============================================================
