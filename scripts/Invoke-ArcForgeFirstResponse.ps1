@@ -30,6 +30,16 @@ if (-not (Test-Path $ReportFolder)) {
     New-Item -Path $ReportFolder -ItemType Directory | Out-Null
 }
 
+# Adds a line to the in-memory TXT report buffer.
+#
+# ArcForge writes results to the console immediately, but it also needs to save
+# the same information to a TXT report at the end of the run. This helper keeps
+# report-writing consistent by appending text to $script:ReportLines.
+#
+# Input:
+# - Line: The exact text to add. Defaults to a blank line when omitted.
+# Output:
+# - No direct output. Updates the script-scoped ReportLines list.
 function Add-ReportLine {
     param (
         [string]$Line = ""
@@ -38,6 +48,21 @@ function Add-ReportLine {
     $script:ReportLines.Add($Line) | Out-Null
 }
 
+# Prints one check result to the console and records it in the TXT report.
+#
+# This is the main output helper used throughout the script. It standardizes the
+# [OK] / [WARN] / [FAIL] format, applies console colors, aligns labels, and
+# increments the summary counters unless CountResult is disabled.
+#
+# Input:
+# - Status: OK, WARN, FAIL, or another status string.
+# - Label: The left-side label shown beside the status.
+# - Value: The result details shown after the label.
+# - CountResult: Whether this line should affect the final summary totals.
+# Output:
+# - Writes to the console.
+# - Adds the same formatted line to $script:ReportLines.
+# - Updates $script:CheckCounts when CountResult is true.
 function Write-Result {
     param (
         [string]$Status,
@@ -71,6 +96,16 @@ function Write-Result {
     Add-ReportLine -Line ("[{0}]{1}  {2} {3}" -f $StatusUpper, $StatusPadding, $LabelPadded, $Value)
 }
 
+# Starts a new report section in both the console and TXT report.
+#
+# Sections are simple bracketed headings like [SYSTEM], [NETWORK], or [SUMMARY].
+# The HTML report later uses these headings to group raw findings into cards.
+#
+# Input:
+# - Title: The section name to display.
+# Output:
+# - Writes a blank line and section heading to the console.
+# - Adds the same section marker to $script:ReportLines.
 function Write-Section {
     param (
         [string]$Title
@@ -83,6 +118,15 @@ function Write-Section {
     Add-ReportLine -Line "[$Title]"
 }
 
+# Builds the final summary section from the accumulated check counters.
+#
+# This function does not run new health checks. It reads the OK/WARN/FAIL totals
+# collected by Write-Result during the script run, then prints an overall status.
+#
+# Output:
+# - Adds the [SUMMARY] section.
+# - Writes total checks, passed checks, warnings, failures, and overall status.
+# - Uses CountResult:$false so summary lines do not inflate their own totals.
 function Write-Summary {
     Write-Section -Title "SUMMARY"
 
@@ -119,6 +163,22 @@ function Write-Summary {
     }
 }
 
+# Determines whether a catalog software item appears to be installed.
+#
+# ArcForge supports several detection methods because Windows software can be
+# discovered in different ways: command availability, installed services, common
+# executable paths, and uninstall-registry display names. This helper combines
+# catalog-provided detection data with a few hand-tuned known-app fallbacks.
+#
+# Input:
+# - SoftwareName: Friendly name from the catalog, such as Chrome or VS Code.
+# - Commands: CLI commands to test with Get-Command.
+# - DisplayNamePatterns: Registry DisplayName wildcard patterns.
+# - CommonPaths: File paths to check with Test-Path.
+# - Services: Windows service names to check.
+# Output:
+# - $true when any detection method finds the software.
+# - $false when none of the checks find it.
 function Test-SoftwareInstalled {
     param (
         [string]$SoftwareName = "",
@@ -128,7 +188,9 @@ function Test-SoftwareInstalled {
         [string[]]$Services = @()
     )
 
-    # Known-app fallback: VS Code
+    # VS Code is handled explicitly because it is commonly installed per-user,
+    # system-wide, or exposed through the "code" command. The generic catalog
+    # detection can miss one of those install styles.
     if ($SoftwareName -eq "VS Code") {
         $VsCodePaths = @(
             "$env:ProgramFiles\Microsoft VS Code\Code.exe",
@@ -159,7 +221,10 @@ function Test-SoftwareInstalled {
     }
 
     # Known software detection normalization.
+    #
     # This supplements the CSV catalog when Detection Target is too human-readable.
+    # Keep this small and focused: it is a fallback layer, not a replacement for
+    # maintaining good catalog data.
     $KnownSoftwareDetections = @{
         "Chrome" = @{
             Commands = @("chrome")
@@ -242,6 +307,8 @@ function Test-SoftwareInstalled {
         }
     }
 
+    # Detection pass 1: command lookup.
+    # Example: "pwsh", "code", "git", or "ffmpeg" exists in PATH.
     foreach ($Command in $Commands) {
         if (-not [string]::IsNullOrWhiteSpace($Command)) {
             if (Get-Command $Command -ErrorAction SilentlyContinue) {
@@ -250,6 +317,8 @@ function Test-SoftwareInstalled {
         }
     }
 
+    # Detection pass 2: service lookup.
+    # Useful for apps/components that register a Windows service.
     foreach ($Service in $Services) {
         if (-not [string]::IsNullOrWhiteSpace($Service)) {
             if (Get-Service -Name $Service -ErrorAction SilentlyContinue) {
@@ -262,6 +331,8 @@ function Test-SoftwareInstalled {
         }
     }
 
+    # Detection pass 3: common executable paths.
+    # Useful when the app exists on disk but is not available as a command.
     foreach ($Path in $CommonPaths) {
         if (-not [string]::IsNullOrWhiteSpace($Path)) {
             if (Test-Path $Path) {
@@ -276,6 +347,8 @@ function Test-SoftwareInstalled {
         "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
     )
 
+    # Detection pass 4: uninstall registry DisplayName patterns.
+    # This catches traditional desktop apps listed in Programs and Features.
     foreach ($RegistryPath in $RegistryPaths) {
         $InstalledApps = Get-ItemProperty $RegistryPath -ErrorAction SilentlyContinue
 
@@ -341,6 +414,15 @@ function Test-SoftwareInstalled {
     return $false
 }
 
+# Normalizes a catalog cell into a simple yes/no decision.
+#
+# The software catalog stores profile membership as text. This helper treats a
+# value as selected only when it trims down to "yes", case-insensitively.
+#
+# Input:
+# - Value: Any catalog cell value.
+# Output:
+# - $true if the value is "yes" after trimming/lowercasing; otherwise $false.
 function Test-YesValue {
     param (
         [object]$Value
@@ -349,6 +431,17 @@ function Test-YesValue {
     return (([string]$Value).Trim().ToLower() -eq "yes")
 }
 
+# Safely reads one column from a software catalog CSV row.
+#
+# This avoids errors when a column is missing or blank. It also trims whitespace
+# so downstream comparisons are not thrown off by accidental spaces.
+#
+# Input:
+# - Row: One Import-Csv row object.
+# - ColumnName: The column/property name to read.
+# Output:
+# - Trimmed string value when the column exists.
+# - Empty string when the column is missing.
 function Get-CatalogValue {
     param (
         [pscustomobject]$Row,
@@ -364,6 +457,18 @@ function Get-CatalogValue {
     return ""
 }
 
+# Builds registry DisplayName wildcard patterns for software detection.
+#
+# Windows uninstall entries often use names that are close to, but not exactly,
+# the catalog software name. This helper creates a small set of flexible patterns
+# from the friendly software name and the detection target.
+#
+# Examples:
+# - "FFmpeg (full)" also produces a pattern for "FFmpeg".
+# - A detection target like "matching Google Chrome" produces "*Google Chrome*".
+#
+# Output:
+# - A unique array of wildcard patterns suitable for DisplayName -like checks.
 function Get-DisplayNamePatterns {
     param (
         [string]$SoftwareName,
@@ -396,6 +501,16 @@ function Get-DisplayNamePatterns {
     return @($Patterns | Sort-Object -Unique)
 }
 
+# Splits a catalog detection target into individual candidates.
+#
+# Catalog cells may contain multiple possible detections separated by slashes,
+# commas, semicolons, or the word "or". This helper turns that single string into
+# a clean list the detection parser can inspect one item at a time.
+#
+# Input:
+# - DetectionTarget: Raw detection target text from the CSV.
+# Output:
+# - Array of trimmed candidate strings.
 function Split-DetectionCandidates {
     param (
         [string]$DetectionTarget
@@ -412,6 +527,20 @@ function Split-DetectionCandidates {
     )
 }
 
+# Converts one software catalog row into concrete detection instructions.
+#
+# The CSV is human-readable, while Test-SoftwareInstalled needs structured lists
+# of commands, services, paths, and registry patterns. This helper bridges that
+# gap by parsing the row and returning a standardized detection config object.
+#
+# Input:
+# - CatalogRow: One Import-Csv software catalog row.
+# Output:
+# - PSCustomObject with these arrays:
+#   - Commands
+#   - DisplayNamePatterns
+#   - CommonPaths
+#   - Services
 function Get-SoftwareDetectionConfig {
     param (
         [pscustomobject]$CatalogRow
@@ -480,6 +609,16 @@ function Get-SoftwareDetectionConfig {
 }
 
 
+# Groups raw TXT report lines into known report sections.
+#
+# The HTML report does not run checks again. Instead, it reads the lines already
+# captured in $ReportLines and sorts them under major section names. Only known
+# sections are captured so accidental bracketed lines do not create random cards.
+#
+# Input:
+# - ReportLines: The full collected report output.
+# Output:
+# - Hashtable where each known section name maps to a list of lines.
 function Get-ArcForgeReportSections {
     param (
         [string[]]$ReportLines
@@ -524,6 +663,20 @@ function Get-ArcForgeReportSections {
     return $Sections
 }
 
+# Generates the self-contained static HTML report.
+#
+# This function turns the raw report lines and summary counters into a polished
+# local HTML file. It does not use JavaScript, external CSS, or external assets.
+# The HTML acts as a future GUI prototype while keeping ArcForge simple and local.
+#
+# Input:
+# - OutputPath: Destination .html file path.
+# - ReportId, ComputerName, CurrentUser, BattlestationProfile, GeneratedAt:
+#   Metadata displayed in the report header/cards.
+# - CheckCounts: Final OK/WARN/FAIL totals.
+# - ReportLines: Raw TXT report lines used to build sections and findings.
+# Output:
+# - Writes a complete HTML document to OutputPath.
 function New-ArcForgeHtmlReport {
     param (
         [string]$OutputPath,
@@ -536,6 +689,10 @@ function New-ArcForgeHtmlReport {
         [string[]]$ReportLines
     )
 
+    # Encodes text before placing it into HTML.
+    #
+    # This prevents report values containing characters like <, >, or & from
+    # breaking the HTML structure or being interpreted as markup.
     function ConvertTo-HtmlSafeText {
         param (
             [string]$Text
@@ -544,6 +701,15 @@ function New-ArcForgeHtmlReport {
         return [System.Net.WebUtility]::HtmlEncode($Text)
     }
 
+    # Converts raw finding lines into an HTML <li> list.
+    #
+    # Some section line collections can be nested arrays, especially when multiple
+    # report sections are combined into one HTML card. This helper flattens them,
+    # removes blanks, HTML-encodes every line, and wraps each finding in <code>.
+    #
+    # Output:
+    # - A string containing one or more <li> elements.
+    # - A muted placeholder <li> when the section has no findings.
     function ConvertTo-ArcForgeHtmlFindingList {
         param (
             [object[]]$Lines,
@@ -584,6 +750,10 @@ function New-ArcForgeHtmlReport {
         }) -join "`n"
     }
 
+    # Flattens nested line arrays into a simple string array.
+    #
+    # Used by readiness scoring so combined sections like System can be counted
+    # the same way as single sections like Network or Security.
     function Get-ArcForgeFlattenedLines {
         param (
             [object[]]$Lines
@@ -609,6 +779,13 @@ function New-ArcForgeHtmlReport {
         )
     }
 
+    # Scores one report area for the Readiness Overview cards.
+    #
+    # This function counts how many [OK], [WARN], and [FAIL] lines exist in a
+    # section, then assigns the card status shown in the HTML dashboard.
+    #
+    # Output:
+    # - PSCustomObject containing name, status label, CSS class, counts, and summary.
     function Get-ArcForgeSectionReadiness {
         param (
             [string]$Name,
@@ -653,6 +830,10 @@ function New-ArcForgeHtmlReport {
         }
     }
 
+    # Builds the HTML block for the Readiness Overview dashboard cards.
+    #
+    # The card data is prepared by Get-ArcForgeSectionReadiness. This helper only
+    # converts those objects into HTML markup for the final report.
     function New-ArcForgeReadinessOverviewHtml {
         param (
             [object[]]$ReadinessCards
@@ -691,6 +872,391 @@ function New-ArcForgeHtmlReport {
             </div>
             <div class="readiness-grid">
 $CardsHtml
+            </div>
+        </section>
+"@
+    }
+
+
+    # Assigns one WARN/FAIL finding to the triage bucket shown in Recommended Actions.
+    #
+    # Why this exists:
+    # - The raw report lines are useful, but a long flat list is hard to scan.
+    # - This helper lets the HTML report group problems into practical buckets,
+    #   almost like a small ticket queue.
+    # - It only affects the HTML Recommended Actions section. It does not change
+    #   the checks themselves, the console output, or the TXT report.
+    #
+    # How it works:
+    # - PowerShell's -match operator checks whether the finding contains certain
+    #   words or phrases.
+    # - The first matching bucket wins because each match immediately returns.
+    # - Anything that does not match a known pattern falls back to General Findings.
+    #
+    # Input:
+    # - Finding: One raw report line such as:
+    #   [WARN]    DNS: Resolution failed
+    #
+    # Output:
+    # - A category name used as a heading in the Recommended Actions panel.
+    function Get-ArcForgeActionCategory {
+        param (
+            [string]$Finding
+        )
+
+        # Missing profile software and catalog problems belong together because
+        # they affect whether the selected Battlestation Profile is fully ready.
+        if ($Finding -match 'recommended for .+ profile but not found|Profile Tools|Catalog File|Catalog Error') {
+            return "Profile Readiness"
+        }
+
+        # Network-related findings are grouped together so internet, gateway, DNS,
+        # and adapter issues are easy to review in one place.
+        if ($Finding -match 'Gateway|Internet Ping|DNS|IP Address|Network Adapter') {
+            return "Network Connectivity"
+        }
+
+        # Security posture findings are grouped separately because they usually
+        # need a manual review rather than an immediate technical repair.
+        if ($Finding -match 'Local Admins|Firewall|Antivirus|Defender') {
+            return "Security Review"
+        }
+
+        # Pending reboot could also be considered system stability, but for this
+        # report it is more useful under Update Readiness because reboots often
+        # block patching, software installs, and troubleshooting.
+        if ($Finding -match 'Pending Reboot|Windows Update|Update Service|BITS Service|Last Hotfix|Hotfix') {
+            return "Update Readiness"
+        }
+
+        # System-level findings are things that affect the local workstation's
+        # stability or day-to-day readiness.
+        if ($Finding -match 'Uptime|Hung Apps|Processes|Services|Storage|Disk') {
+            return "System Stability"
+        }
+
+        # Safe fallback. This prevents a finding from disappearing just because
+        # it did not match one of the known patterns above.
+        return "General Findings"
+    }
+
+    # Gives each action item a short, beginner-friendly next step.
+    #
+    # Why this exists:
+    # - A finding tells the user what ArcForge noticed.
+    # - A suggested action tells the user what to do next.
+    # - Keeping this in one helper makes the wording easier to improve later.
+    #
+    # Important:
+    # - These are intentionally simple Tier-1 style suggestions.
+    # - The detailed technical evidence still lives in the normal section cards
+    #   and in Raw Findings.
+    # - This helper does not fix anything automatically.
+    #
+    # Input:
+    # - Finding: One raw WARN/FAIL report line.
+    # - BattlestationProfile: The selected profile, such as Developer or Gaming.
+    #
+    # Output:
+    # - A plain English remediation suggestion displayed under the action item.
+    function Get-ArcForgeSuggestedAction {
+        param (
+            [string]$Finding,
+            [string]$BattlestationProfile
+        )
+
+        # Long uptime can make troubleshooting noisy because a reboot may clear
+        # pending updates, stale services, driver weirdness, or old hung processes.
+        if ($Finding -match 'Uptime') {
+            return "Reboot during the next maintenance window, then rerun ArcForge."
+        }
+
+        # Hung apps are usually best handled by closing/restarting the affected
+        # apps before assuming the whole workstation is unhealthy.
+        if ($Finding -match 'Hung Apps') {
+            return "Close or restart the affected apps, then rerun ArcForge."
+        }
+
+        # A network warning could come from several checks, so this suggestion
+        # points the user toward the most likely basic troubleshooting areas.
+        if ($Finding -match 'Gateway|Internet Ping|DNS|IP Address|Network Adapter') {
+            return "Verify network connectivity, adapter configuration, DNS settings, and gateway reachability."
+        }
+
+        # Local administrator membership is not automatically bad, but it should
+        # be intentional. This keeps the action worded as a review item.
+        if ($Finding -match 'Local Admins') {
+            return "Confirm all local administrator accounts are expected."
+        }
+
+        # Firewall checks can be satisfied by Windows Firewall or a valid third-
+        # party firewall, so the suggestion avoids assuming Defender is the only answer.
+        if ($Finding -match 'Firewall') {
+            return "Verify Windows Firewall or the active third-party firewall is enabled."
+        }
+
+        # Antivirus can also be provided by third-party tools, so this suggestion
+        # asks the user to confirm the expected provider is healthy.
+        if ($Finding -match 'Antivirus|Defender') {
+            return "Confirm an expected antivirus provider is installed, enabled, and reporting healthy."
+        }
+
+        # Pending reboot is often the first thing to resolve before troubleshooting
+        # Windows Update, installers, or other system changes.
+        if ($Finding -match 'Pending Reboot') {
+            return "Reboot before continuing patching, installs, or troubleshooting."
+        }
+
+        # Windows Update-related warnings are grouped around patch readiness.
+        if ($Finding -match 'Windows Update|Update Service|BITS Service|Last Hotfix|Hotfix') {
+            return "Review Windows Update readiness before patching or installing additional software."
+        }
+
+        # Catalog-level issues are different from missing apps. They may mean the
+        # runtime CSV is missing, broken, or not matching the selected profile.
+        if ($Finding -match 'Profile Tools|Catalog File|Catalog Error') {
+            return "Review the ArcForge Software Catalog and confirm the selected Battlestation Profile is using the expected runtime catalog."
+        }
+
+        # Safe fallback for any current or future WARN/FAIL line that does not
+        # match the more specific patterns above.
+        return "Review the related section for details, then rerun ArcForge after remediation."
+    }
+
+    # Converts raw WARN/FAIL report lines into grouped action objects.
+    #
+    # Why this exists:
+    # - The checks currently write human-readable report lines, not structured
+    #   objects. That is fine for now.
+    # - This function acts as a thin presentation adapter. It reads those existing
+    #   lines and prepares clean objects for the HTML action panel.
+    # - This avoids refactoring the check engine during v0.17.
+    #
+    # What gets filtered out:
+    # - The SUMMARY section includes lines like "Warnings:" and "Failures:".
+    #   Those are totals, not actionable findings, so they are excluded.
+    # - "Overall Status" is also excluded because it is a summary label, not a
+    #   specific repair item.
+    #
+    # Special software handling:
+    # - A profile like Developer can have many missing recommended tools.
+    # - Listing every missing tool inside Recommended Actions makes the action
+    #   queue noisy.
+    # - This function collects those missing-tool warnings and replaces them with
+    #   one summarized Profile Readiness action.
+    # - The full missing-tools list is still preserved in Software Readiness and
+    #   Raw Findings.
+    #
+    # Input:
+    # - ReportLines: The complete in-memory TXT report lines.
+    # - BattlestationProfile: The selected profile name.
+    #
+    # Output:
+    # - PSCustomObject items with Category, Severity, Title, Detail, and SuggestedAction.
+    function Get-ArcForgeActionItems {
+        param (
+            [string[]]$ReportLines,
+            [string]$BattlestationProfile
+        )
+
+        # Start with every WARN/FAIL line from the finished report.
+        # Then remove summary counters so the action queue only shows real issues.
+        $FindingLines = @(
+            $ReportLines |
+                Where-Object {
+                    $_ -match '^\[(WARN|FAIL)\]' -and
+                    $_ -notmatch '^\[(WARN|FAIL)\]\s+Warnings:' -and
+                    $_ -notmatch '^\[(WARN|FAIL)\]\s+Failures:' -and
+                    $_ -notmatch '^\[(WARN|FAIL)\]\s+Overall Status:'
+                }
+        )
+
+        # ActionItems will hold the final objects that become cards in HTML.
+        $ActionItems = [System.Collections.Generic.List[object]]::new()
+
+        # MissingProfileTools temporarily stores software warnings that should be
+        # summarized into one action instead of displayed one-by-one.
+        $MissingProfileTools = [System.Collections.Generic.List[string]]::new()
+
+        foreach ($Finding in $FindingLines) {
+            # Detect missing recommended profile tools.
+            #
+            # Example matched line:
+            # [WARN]    Git: Recommended for Developer profile but not found
+            #
+            # Named regex groups like (?<Severity>WARN|FAIL) make the pattern
+            # easier to understand later, even though this specific branch only
+            # needs to count the matching lines.
+            if ($Finding -match '^\[(?<Severity>WARN|FAIL)\]\s+(?<ToolName>.+?):\s+Recommended for (?<Profile>.+?) profile but not found$') {
+                $MissingProfileTools.Add($Finding) | Out-Null
+                continue
+            }
+
+            # Default to WARN so a malformed line still has a safe visual style.
+            # If the line begins with [WARN] or [FAIL], use that real severity.
+            $Severity = "WARN"
+            if ($Finding -match '^\[(?<Severity>WARN|FAIL)\]') {
+                $Severity = $Matches.Severity
+            }
+
+            # Remove the leading [WARN] or [FAIL] tag from the title because the
+            # visual badge already shows severity in the HTML action card.
+            $Title = $Finding -replace '^\[(WARN|FAIL)\]\s+', ''
+
+            # Build one normalized action object for the HTML renderer.
+            # The renderer does not need to know how the item was detected; it
+            # only needs these simple fields.
+            $ActionItems.Add([pscustomobject]@{
+                Category        = Get-ArcForgeActionCategory -Finding $Finding
+                Severity        = $Severity
+                Title           = $Title
+                Detail          = ""
+                SuggestedAction = Get-ArcForgeSuggestedAction -Finding $Finding -BattlestationProfile $BattlestationProfile
+            }) | Out-Null
+        }
+
+        # Add one summarized software readiness action after all findings have
+        # been scanned. This keeps Recommended Actions readable while preserving
+        # the complete details elsewhere in the report.
+        if ($MissingProfileTools.Count -gt 0) {
+            $ActionItems.Add([pscustomobject]@{
+                Category        = "Profile Readiness"
+                Severity        = "WARN"
+                Title           = "$($MissingProfileTools.Count) recommended $BattlestationProfile profile tools are missing."
+                Detail          = "Software Readiness contains the full missing-tools list."
+                SuggestedAction = "Review Software Readiness before using this workstation for $BattlestationProfile work."
+            }) | Out-Null
+        }
+
+        # Return as an array so the caller can safely count/filter the result,
+        # even when there is only one action item.
+        return @($ActionItems)
+    }
+
+    # Builds the grouped Recommended Actions triage panel.
+    #
+    # Why this exists:
+    # - Get-ArcForgeActionItems prepares clean action objects.
+    # - This function turns those objects into static HTML.
+    # - Separating data preparation from HTML generation makes future polishing
+    #   easier without changing the report parsing logic.
+    #
+    # Important:
+    # - The output is static HTML only.
+    # - No JavaScript is used.
+    # - No external dependencies are used.
+    # - This only changes the HTML Recommended Actions section.
+    #
+    # Input:
+    # - ActionItems: Objects returned by Get-ArcForgeActionItems.
+    #
+    # Output:
+    # - A string containing the complete Recommended Actions <section> block.
+    function New-ArcForgeRecommendedActionsHtml {
+        param (
+            [object[]]$ActionItems
+        )
+
+        # If there are no WARN/FAIL action items, show a clean healthy-state card
+        # instead of leaving the section blank.
+        if (-not $ActionItems -or $ActionItems.Count -eq 0) {
+            return @"
+        <section class="card section">
+            <div class="section-title">
+                <h2>Recommended Actions</h2>
+                <p>No immediate recommended actions. System appears healthy based on current checks.</p>
+            </div>
+        </section>
+"@
+        }
+
+        # Controls the order of groups in the HTML report.
+        #
+        # The order is intentionally not alphabetical. It follows a practical
+        # triage flow: local stability, network, profile tools, security, updates,
+        # then anything uncategorized.
+        $CategoryOrder = @(
+            "System Stability",
+            "Network Connectivity",
+            "Profile Readiness",
+            "Security Review",
+            "Update Readiness",
+            "General Findings"
+        )
+
+        $GroupBlocks = @()
+
+        foreach ($Category in $CategoryOrder) {
+            # Pull only the items for the current category.
+            # Wrapping the result in @() makes .Count reliable even if there is
+            # only one matching item.
+            $CategoryItems = @($ActionItems | Where-Object { $_.Category -eq $Category })
+
+            # Skip empty categories so the report only shows useful groups.
+            if (-not $CategoryItems -or $CategoryItems.Count -eq 0) {
+                continue
+            }
+
+            $ItemBlocks = @()
+
+            foreach ($Item in $CategoryItems) {
+                # Build a CSS class from the severity, such as action-warn or
+                # action-fail. ToLowerInvariant avoids locale-specific casing.
+                $SeverityClass = "action-$($Item.Severity.ToLowerInvariant())"
+
+                # Always HTML-encode values before inserting them into the HTML.
+                # This protects the report if a finding contains characters like
+                # <, >, &, quotes, or other markup-looking text.
+                $SafeSeverity = ConvertTo-HtmlSafeText $Item.Severity
+                $SafeTitle = ConvertTo-HtmlSafeText $Item.Title
+                $SafeDetail = ConvertTo-HtmlSafeText $Item.Detail
+                $SafeSuggestedAction = ConvertTo-HtmlSafeText $Item.SuggestedAction
+
+                # Detail is optional. Most findings do not need a second detail
+                # line, but the summarized software action uses it to point back
+                # to the full Software Readiness list.
+                $DetailHtml = ""
+                if (-not [string]::IsNullOrWhiteSpace($Item.Detail)) {
+                    $DetailHtml = "<p class=`"action-detail`">$SafeDetail</p>"
+                }
+
+                # This is the individual ticket-style action card.
+                # The severity badge and left border provide quick visual context.
+                $ItemBlocks += @"
+                    <article class="action-item $SeverityClass">
+                        <div class="action-header">
+                            <span class="action-severity">$SafeSeverity</span>
+                            <strong>$SafeTitle</strong>
+                        </div>
+                        $DetailHtml
+                        <p class="action-suggestion"><strong>Suggested Action:</strong> $SafeSuggestedAction</p>
+                    </article>
+"@
+            }
+
+            $SafeCategory = ConvertTo-HtmlSafeText $Category
+            $ItemsHtml = $ItemBlocks -join "`n"
+
+            # This is the group wrapper, such as System Stability or Security Review.
+            $GroupBlocks += @"
+                <div class="action-group">
+                    <h3>$SafeCategory</h3>
+$ItemsHtml
+                </div>
+"@
+        }
+
+        $GroupsHtml = $GroupBlocks -join "`n"
+
+        # Final Recommended Actions section inserted into the main HTML template.
+        return @"
+        <section class="card section">
+            <div class="section-title">
+                <h2>Recommended Actions</h2>
+                <p>Grouped WARN/FAIL findings prioritized as a local triage queue.</p>
+            </div>
+            <div class="action-queue">
+$GroupsHtml
             </div>
         </section>
 "@
@@ -743,25 +1309,15 @@ $CardsHtml
         $StatusClass = "status-ok"
     }
 
-    $RecommendedActions = @(
-        $ReportLines |
-            Where-Object {
-                $_ -match "^\[(WARN|FAIL)\]" -and
-                $_ -notmatch "^\[(WARN|FAIL)\]\s+Warnings:" -and
-                $_ -notmatch "^\[(WARN|FAIL)\]\s+Failures:" -and
-                $_ -notmatch "^\[(WARN|FAIL)\]\s+Overall Status:"
-            } |
-            ForEach-Object { ConvertTo-HtmlSafeText $_ }
-    )
-
-    if (-not $RecommendedActions -or $RecommendedActions.Count -eq 0) {
-        $RecommendedActionsHtml = "<li>No immediate recommended actions. System appears healthy based on current checks.</li>"
-    }
-    else {
-        $RecommendedActionsHtml = ($RecommendedActions | ForEach-Object {
-            "<li><code>$_</code></li>"
-        }) -join "`n"
-    }
+    # Build the v0.17 Recommended Actions queue.
+    #
+    # Step 1: Convert raw WARN/FAIL report lines into simple action objects.
+    # Step 2: Convert those action objects into grouped static HTML.
+    #
+    # This happens after the overall counts/status are calculated because the
+    # action queue depends on the completed report output.
+    $RecommendedActionItems = Get-ArcForgeActionItems -ReportLines $ReportLines -BattlestationProfile $BattlestationProfile
+    $RecommendedActionsHtml = New-ArcForgeRecommendedActionsHtml -ActionItems $RecommendedActionItems
 
     $RawFindings = ConvertTo-HtmlSafeText ($ReportLines -join "`r`n")
 
@@ -1035,6 +1591,90 @@ $CardsHtml
             color: var(--muted);
         }
 
+        /* v0.17 Recommended Actions queue styles.
+           These classes only affect the HTML report. They do not affect console
+           output, TXT reports, or the health-check logic. */
+
+        /* Overall container for all action groups. Grid gives us even spacing
+           between groups without needing JavaScript or external CSS. */
+        .action-queue {
+            display: grid;
+            gap: 16px;
+        }
+
+        /* One group box, such as System Stability or Network Connectivity. */
+        .action-group {
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: #f8fafc;
+            padding: 16px;
+        }
+
+        /* Category heading inside each action group. */
+        .action-group h3 {
+            margin: 0 0 12px 0;
+            font-size: 15px;
+        }
+
+        /* One individual ticket-style action item. The left border is neutral by
+           default and becomes yellow/red when action-warn or action-fail is added. */
+        .action-item {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-left: 5px solid var(--muted);
+            border-radius: 12px;
+            padding: 13px 14px;
+            margin-top: 10px;
+        }
+
+        /* WARN action items get the warning color on the left border. */
+        .action-warn {
+            border-left-color: var(--warn);
+        }
+
+        /* FAIL action items get the failure color on the left border. */
+        .action-fail {
+            border-left-color: var(--fail);
+        }
+
+        /* Header row inside an action item. Flex keeps the severity badge and
+           title aligned while still allowing wrapping on smaller screens. */
+        .action-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        /* Small WARN/FAIL pill shown beside each action title. */
+        .action-severity {
+            background: var(--chip);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            padding: 4px 9px;
+        }
+
+        /* Make the WARN badge text use the same warning color used elsewhere. */
+        .action-warn .action-severity {
+            color: var(--warn);
+        }
+
+        /* Make the FAIL badge text use the same failure color used elsewhere. */
+        .action-fail .action-severity {
+            color: var(--fail);
+        }
+
+        /* Optional detail text and suggested-action text under each action item. */
+        .action-detail,
+        .action-suggestion {
+            margin: 9px 0 0 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
         ul {
             margin: 0;
             padding-left: 22px;
@@ -1182,12 +1822,7 @@ $ReadinessOverviewHtml
             </ul>
         </section>
 
-        <section class="card section">
-            <h2>Recommended Actions</h2>
-            <ul>
-                $RecommendedActionsHtml
-            </ul>
-        </section>
+$RecommendedActionsHtml
 
         <section class="card section">
             <h2>Raw Findings</h2>
