@@ -1,5 +1,5 @@
 # ArcForge First Response
-# ArcForge First Response Report v0.16
+# ArcForge First Response Report v0.18
 
 param (
     [ValidateSet("General", "Gaming", "Creator", "Developer", "Homelab", "Secure")]
@@ -865,7 +865,7 @@ function New-ArcForgeHtmlReport {
         $CardsHtml = $CardBlocks -join "`n"
 
         return @"
-        <section class="card section">
+        <section id="readiness-overview" class="card section">
             <div class="section-title">
                 <h2>Readiness Overview</h2>
                 <p>Dashboard-style summary of major battlestation readiness areas.</p>
@@ -1161,7 +1161,7 @@ $CardsHtml
         # instead of leaving the section blank.
         if (-not $ActionItems -or $ActionItems.Count -eq 0) {
             return @"
-        <section class="card section">
+        <section id="recommended-actions" class="card section">
             <div class="section-title">
                 <h2>Recommended Actions</h2>
                 <p>No immediate recommended actions. System appears healthy based on current checks.</p>
@@ -1250,7 +1250,7 @@ $ItemsHtml
 
         # Final Recommended Actions section inserted into the main HTML template.
         return @"
-        <section class="card section">
+        <section id="recommended-actions" class="card section">
             <div class="section-title">
                 <h2>Recommended Actions</h2>
                 <p>Grouped WARN/FAIL findings prioritized as a local triage queue.</p>
@@ -1259,6 +1259,52 @@ $ItemsHtml
 $GroupsHtml
             </div>
         </section>
+"@
+    }
+
+    # Builds the static sidebar navigation used by the HTML report.
+    #
+    # Why this exists:
+    # - v0.18 is focused on presentation/readability only.
+    # - The report is getting long enough that quick-jump links make it easier
+    #   to move between the summary, readiness cards, detailed sections, actions,
+    #   and raw output.
+    # - This helper keeps the navigation markup in one small place instead of
+    #   scattering repeated <a> tags throughout the main HTML template.
+    #
+    # Important:
+    # - These are normal internal anchor links like href="#network".
+    # - No JavaScript is used.
+    # - No external dependencies are used.
+    # - This does not change any check logic, console output, or TXT output.
+    #
+    # Troubleshooting rule:
+    # - Every href="#section-name" in this helper must match an id="section-name"
+    #   somewhere in the HTML template below.
+    # - Example: href="#report-summary" must match id="report-summary".
+    # - If a sidebar item appears but does not jump correctly, inspect this helper
+    #   and then inspect the matching HTML section ID.
+    #
+    # Output:
+    # - A string containing the complete sidebar <aside> block.
+    function New-ArcForgeReportNavigationHtml {
+        return @"
+        <aside class="report-sidebar">
+            <div class="sidebar-title">Report Navigation</div>
+            <div class="sidebar-subtitle">Jump to a major report section.</div>
+            <nav class="sidebar-nav" aria-label="ArcForge report sections">
+                <a class="sidebar-link" href="#report-summary">Report Summary</a>
+                <a class="sidebar-link" href="#incident-summary">Incident Summary</a>
+                <a class="sidebar-link" href="#readiness-overview">Readiness Overview</a>
+                <a class="sidebar-link" href="#system">System</a>
+                <a class="sidebar-link" href="#network">Network</a>
+                <a class="sidebar-link" href="#software-readiness">Software Readiness</a>
+                <a class="sidebar-link" href="#security">Security</a>
+                <a class="sidebar-link" href="#updates">Updates</a>
+                <a class="sidebar-link" href="#recommended-actions">Recommended Actions</a>
+                <a class="sidebar-link" href="#raw-findings">Raw Findings</a>
+            </nav>
+        </aside>
 "@
     }
 
@@ -1319,6 +1365,13 @@ $GroupsHtml
     $RecommendedActionItems = Get-ArcForgeActionItems -ReportLines $ReportLines -BattlestationProfile $BattlestationProfile
     $RecommendedActionsHtml = New-ArcForgeRecommendedActionsHtml -ActionItems $RecommendedActionItems
 
+    # Build the v0.18 static report navigation.
+    #
+    # This creates the sidebar HTML once, then the main template inserts it beside
+    # the report content. Keeping it as a variable makes the final HTML layout
+    # easier to read and avoids mixing navigation details into the report cards.
+    $ReportNavigationHtml = New-ArcForgeReportNavigationHtml
+
     $RawFindings = ConvertTo-HtmlSafeText ($ReportLines -join "`r`n")
 
     $Html = @"
@@ -1350,9 +1403,90 @@ $GroupsHtml
             line-height: 1.5;
         }
 
+        /* v0.18 report layout shell.
+           The report now has two presentation-only columns on desktop:
+           a sidebar navigation panel on the left and the existing report content
+           on the right. This is still a static local HTML report, not a GUI. */
         .report-shell {
-            max-width: 1100px;
+            max-width: 1380px;
             margin: 0 auto;
+            display: grid;
+            grid-template-columns: 260px minmax(0, 1fr);
+            gap: 24px;
+            align-items: start;
+        }
+
+        /* Main report column.
+           min-width: 0 prevents long code/raw findings text from forcing the
+           grid wider than the browser window. */
+        .report-main {
+            min-width: 0;
+        }
+
+        /* v0.18 sidebar navigation card.
+           position: sticky keeps the quick links visible while scrolling on
+           desktop. It is safe because it is pure CSS and does not require JS. */
+        .report-sidebar {
+            position: sticky;
+            top: 24px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+        }
+
+        .sidebar-title {
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .sidebar-subtitle {
+            color: var(--muted);
+            font-size: 13px;
+            margin-bottom: 14px;
+        }
+
+        .sidebar-nav {
+            display: grid;
+            gap: 8px;
+        }
+
+        .sidebar-link {
+            color: var(--text);
+            text-decoration: none;
+            border: 1px solid transparent;
+            border-radius: 10px;
+            padding: 9px 10px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .sidebar-link:hover,
+        .sidebar-link:focus {
+            background: var(--chip);
+            border-color: var(--border);
+        }
+
+        /* ============================================================
+           v0.18 HTML ANCHOR TARGET SPACING
+           ============================================================
+           These rules help the sidebar links land cleanly.
+
+           How the sidebar jump works:
+           - A sidebar link such as href="#report-summary" looks for a matching
+             HTML element with id="report-summary".
+           - The browser handles that jump automatically.
+           - scroll-margin-top gives the jump target a little breathing room so
+             the section does not land too tightly against the top of the window.
+
+           Troubleshooting rule:
+           - If a sidebar link changes the browser URL but does not visibly jump,
+             confirm the matching id exists in the HTML template.
+           ============================================================ */
+        .section,
+        .report-summary {
+            scroll-margin-top: 24px;
         }
 
         .ticket-header {
@@ -1710,6 +1844,14 @@ $GroupsHtml
         }
 
         @media (max-width: 900px) {
+            .report-shell {
+                grid-template-columns: 1fr;
+            }
+
+            .report-sidebar {
+                position: static;
+            }
+
             .grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
@@ -1727,7 +1869,39 @@ $GroupsHtml
     </style>
 </head>
 <body>
-    <main class="report-shell">
+    <div class="report-shell">
+$ReportNavigationHtml
+
+        <main class="report-main">
+        <!-- ============================================================
+             v0.18 REPORT SUMMARY MODULE
+             ============================================================
+             This named section groups the top summary area of the HTML report.
+
+             Sidebar link:
+             - href="#report-summary"
+
+             Matching anchor:
+             - id="report-summary"
+
+             Why this matters:
+             - The sidebar can now jump back to the top summary area without using
+               a generic "Back to Top" label.
+             - This keeps the HTML report modular: Report Summary, Incident Summary,
+               Readiness Overview, detailed sections, Recommended Actions, and Raw Findings.
+
+             Contains:
+             - report title/status header
+             - report ID
+             - generated time
+             - computer name
+             - current user
+             - Battlestation Profile
+             - overall status
+             - total checks
+             - report type
+             ============================================================ -->
+        <section id="report-summary" class="report-summary">
         <header class="ticket-header">
             <div class="eyebrow">ArcForge First Response</div>
             <h1>First Response Report</h1>
@@ -1771,8 +1945,10 @@ $GroupsHtml
                 <div class="meta-value">First Response Triage</div>
             </div>
         </section>
+        </section>
+        <!-- v0.18 REPORT SUMMARY MODULE END -->
 
-        <section class="card section">
+        <section id="incident-summary" class="card section">
             <h2>Incident Summary</h2>
             <p class="muted">
                 ArcForge First Response completed a local workstation readiness check using the
@@ -1787,35 +1963,35 @@ $GroupsHtml
 
 $ReadinessOverviewHtml
 
-        <section class="card section">
+        <section id="system" class="card section">
             <h2>System</h2>
             <ul>
                 $SystemFindingsHtml
             </ul>
         </section>
 
-        <section class="card section">
+        <section id="network" class="card section">
             <h2>Network</h2>
             <ul>
                 $NetworkFindingsHtml
             </ul>
         </section>
 
-        <section class="card section">
+        <section id="software-readiness" class="card section">
             <h2>Software Readiness</h2>
             <ul>
                 $SoftwareFindingsHtml
             </ul>
         </section>
 
-        <section class="card section">
+        <section id="security" class="card section">
             <h2>Security</h2>
             <ul>
                 $SecurityFindingsHtml
             </ul>
         </section>
 
-        <section class="card section">
+        <section id="updates" class="card section">
             <h2>Updates</h2>
             <ul>
                 $UpdatesFindingsHtml
@@ -1824,11 +2000,12 @@ $ReadinessOverviewHtml
 
 $RecommendedActionsHtml
 
-        <section class="card section">
+        <section id="raw-findings" class="card section">
             <h2>Raw Findings</h2>
             <pre>$RawFindings</pre>
         </section>
-    </main>
+        </main>
+    </div>
 </body>
 </html>
 "@
