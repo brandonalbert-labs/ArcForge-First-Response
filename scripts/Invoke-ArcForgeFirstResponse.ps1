@@ -1,5 +1,5 @@
 # ArcForge First Response
-# ArcForge First Response Report v0.21
+# ArcForge First Response Report v0.22
 
 param (
     [ValidateSet("General", "Gaming", "Creator", "Developer", "Homelab", "Secure")]
@@ -846,19 +846,54 @@ function New-ArcForgeHtmlReport {
             $SafeStatus = ConvertTo-HtmlSafeText $Card.Status
             $SafeSummary = ConvertTo-HtmlSafeText $Card.Summary
 
+            # v0.22 presentation-only status classes.
+            # These classes control the left-border accent for the Readiness
+            # Overview cards. They do not change the underlying status values
+            # or the shared StatusClass property used elsewhere in the HTML.
+            $CardVisualClass = switch ($Card.Status) {
+                "OK"        { "readiness-card-ok" }
+                "Attention" { "readiness-card-warn" }
+                "Critical"  { "readiness-card-fail" }
+                default     { "readiness-card-unknown" }
+            }
+
+            # v0.22 presentation-only navigation target.
+            # The Readiness Overview cards now behave like dashboard shortcuts.
+            # Each card jumps to the matching detailed report section by using
+            # the same static anchor IDs already used by the sidebar navigation.
+            #
+            # Important:
+            # - This is only an HTML link target.
+            # - No JavaScript is used.
+            # - This does not change check logic, console output, or TXT output.
+            # - If a card does not jump correctly, compare these anchor values
+            #   with the matching id="section-name" values in the HTML sections.
+            $CardAnchor = switch ($Card.Name) {
+                "System"             { "system" }
+                "Network"            { "network" }
+                "Software Readiness" { "software-readiness" }
+                "Security"           { "security" }
+                "Updates"            { "updates" }
+                default              { "readiness-overview" }
+            }
+
+            $SafeCardAnchor = ConvertTo-HtmlSafeText $CardAnchor
+
             $CardBlocks += @"
-            <article class="readiness-card $($Card.StatusClass)">
-                <div class="readiness-card-header">
-                    <h3>$SafeName</h3>
-                    <span class="readiness-status">$SafeStatus</span>
-                </div>
-                <div class="readiness-counts">
-                    <span><strong>$($Card.OkCount)</strong> OK</span>
-                    <span><strong>$($Card.WarnCount)</strong> WARN</span>
-                    <span><strong>$($Card.FailCount)</strong> FAIL</span>
-                </div>
-                <p>$SafeSummary</p>
-            </article>
+            <a class="readiness-card-link" href="#$SafeCardAnchor" title="Jump to $SafeName details" aria-label="Jump to $SafeName details">
+                <article class="readiness-card $($Card.StatusClass) $CardVisualClass">
+                    <div class="readiness-card-header">
+                        <h3>$SafeName</h3>
+                        <span class="readiness-status">$SafeStatus</span>
+                    </div>
+                    <div class="readiness-counts" aria-label="$SafeName readiness counts">
+                        <span class="readiness-count-item readiness-count-ok"><strong>$($Card.OkCount)</strong><span>OK</span></span>
+                        <span class="readiness-count-item readiness-count-warn"><strong>$($Card.WarnCount)</strong><span>WARN</span></span>
+                        <span class="readiness-count-item readiness-count-fail"><strong>$($Card.FailCount)</strong><span>FAIL</span></span>
+                    </div>
+                    <p class="readiness-card-summary">$SafeSummary</p>
+                </article>
+            </a>
 "@
         }
 
@@ -2116,102 +2151,168 @@ $NavigationLinksHtml
             font-size: 0.95rem;
         }
 
+        /* v0.22 Readiness Overview dashboard card styles.
+           Why this exists:
+           - The Readiness Overview is the fast-scan dashboard near the top of
+             the static HTML report.
+           - These cards summarize the five primary readiness domains and now
+             act as no-JavaScript shortcuts to the matching detailed sections.
+           Important:
+           - This is presentation-only.
+           - These classes do not change check logic, console output, TXT report
+             output, or the readiness data itself.
+           Troubleshooting rule:
+           - Layout/visual issue: inspect these readiness-card styles first.
+           - Wrong numbers/status: inspect Get-ArcForgeSectionReadiness instead.
+           - Broken card jump: confirm the href="#section-name" values match the
+             detailed report section IDs. */
         .readiness-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
             gap: 14px;
+            align-items: stretch;
+        }
+
+        .readiness-card-link {
+            color: inherit;
+            text-decoration: none;
+            display: flex;
+            height: 100%;
         }
 
         .readiness-card {
-            background: #f8fafc;
+            min-width: 0;
+            height: 100%;
+            width: 100%;
+            box-sizing: border-box;
             border: 1px solid var(--border);
+            border-left: 4px solid var(--muted);
+            border-radius: 12px;
+            padding: 16px 18px;
+            background: #f8fafc;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .readiness-card-link:hover .readiness-card {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.10);
+        }
+
+        .readiness-card-link:focus-visible {
+            outline: 2px solid rgba(37, 99, 235, 0.35);
+            outline-offset: 3px;
             border-radius: 14px;
-            padding: 16px;
         }
 
         .readiness-card-header {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             justify-content: space-between;
             gap: 12px;
-            margin-bottom: 14px;
+            min-height: 36px;
+            margin-bottom: 12px;
         }
 
         .readiness-card h3 {
             margin: 0;
-            font-size: 16px;
+            min-height: 36px;
+            font-size: 15px;
+            line-height: 1.2;
         }
 
         .readiness-status {
             border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.04em;
+            padding: 4px 9px;
+            font-size: 10px;
+            font-weight: 750;
+            letter-spacing: 0.05em;
             text-transform: uppercase;
+            white-space: nowrap;
         }
 
         .readiness-counts {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 12px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 7px;
+            margin-bottom: 11px;
         }
 
-        .readiness-counts span {
+        .readiness-count-item {
             background: var(--panel);
             border: 1px solid var(--border);
             border-radius: 10px;
             color: var(--muted);
-            font-size: 12px;
-            padding: 8px;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 7px 6px;
             text-align: center;
         }
 
-        .readiness-counts strong {
+        .readiness-count-item strong {
             display: block;
             color: var(--text);
-            font-size: 17px;
+            font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+            font-size: 18px;
+            line-height: 1.1;
+            margin-bottom: 2px;
         }
 
-        .readiness-card p {
+        .readiness-count-item span {
+            display: block;
+        }
+
+        .readiness-count-ok strong {
+            color: var(--ok);
+        }
+
+        .readiness-count-warn strong {
+            color: var(--warn);
+        }
+
+        .readiness-count-fail strong {
+            color: var(--fail);
+        }
+
+        .readiness-card-summary {
             margin: 0;
             color: var(--muted);
-            font-size: 13px;
+            font-size: 12.5px;
+            line-height: 1.45;
         }
 
-        .readiness-ok {
-            border-color: rgba(31, 143, 77, 0.45);
+        .readiness-card-ok {
+            border-left-color: var(--ok);
         }
 
-        .readiness-ok .readiness-status {
+        .readiness-card-ok .readiness-status {
             background: rgba(31, 143, 77, 0.12);
             color: var(--ok);
         }
 
-        .readiness-attention {
-            border-color: rgba(183, 121, 31, 0.45);
+        .readiness-card-warn {
+            border-left-color: var(--warn);
         }
 
-        .readiness-attention .readiness-status {
+        .readiness-card-warn .readiness-status {
             background: rgba(183, 121, 31, 0.12);
             color: var(--warn);
         }
 
-        .readiness-critical {
-            border-color: rgba(197, 48, 48, 0.45);
+        .readiness-card-fail {
+            border-left-color: var(--fail);
         }
 
-        .readiness-critical .readiness-status {
+        .readiness-card-fail .readiness-status {
             background: rgba(197, 48, 48, 0.12);
             color: var(--fail);
         }
 
-        .readiness-neutral {
-            border-color: rgba(101, 117, 139, 0.35);
+        .readiness-card-unknown {
+            border-left-color: var(--muted);
         }
 
-        .readiness-neutral .readiness-status {
+        .readiness-card-unknown .readiness-status {
             background: rgba(101, 117, 139, 0.12);
             color: var(--muted);
         }
