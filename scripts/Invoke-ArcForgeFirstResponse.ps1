@@ -1,5 +1,5 @@
 # ArcForge First Response
-# ArcForge First Response Report v0.20
+# ArcForge First Response Report v0.21
 
 param (
     [ValidateSet("General", "Gaming", "Creator", "Developer", "Homelab", "Secure")]
@@ -2330,6 +2330,72 @@ $NavigationLinksHtml
             font-size: 13px;
         }
 
+        /* v0.21 collapsible technical depth
+        Why this exists:
+        - Raw Findings are useful for troubleshooting, but visually heavy.
+        - Native <details>/<summary> gives us a clean collapse/expand control.
+        - This uses no JavaScript and does not affect check logic, console output, or TXT output.
+
+        Troubleshooting rule:
+        - Treat <summary> like the clickable button.
+        - Treat summary::after like the chevron icon.
+        */
+        .technical-depth {
+            margin: 0;
+        }
+
+        .technical-depth summary {
+            min-height: 48px;
+            padding: 0 24px;
+            cursor: pointer;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #0f172a;
+            user-select: none;
+        }
+
+        .technical-depth summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .technical-depth summary::marker {
+            content: "";
+        }
+
+        /* Custom chevron.
+        This avoids the "door off the hinges" look because the icon is a small CSS shape
+        rotating around its own center instead of rotating a text glyph.
+        */
+        .technical-depth summary::after {
+            content: "";
+            width: 9px;
+            height: 9px;
+            border-right: 2px solid #64748b;
+            border-bottom: 2px solid #64748b;
+            transform: rotate(-45deg);
+            transform-origin: center center;
+            transition: transform 0.2s ease;
+            flex: 0 0 auto;
+        }
+
+        /* When the native details block is open, rotate the chevron downward. */
+        .technical-depth[open] summary::after {
+            transform: rotate(45deg);
+        }
+
+        .technical-depth[open] summary {
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .technical-depth pre {
+            margin: 20px;
+        }
+
         .muted {
             color: var(--muted);
         }
@@ -2461,9 +2527,24 @@ $ReadinessOverviewHtml
 
 $RecommendedActionsHtml
 
+        <!--
+            v0.21 collapsible technical depth
+            Why this exists:
+            - Raw Findings are still part of the HTML report, but they are no
+              longer forced into the main scan path.
+            - <details>/<summary> is native HTML, so this adds collapsible
+              behavior without JavaScript or external dependencies.
+
+            Important:
+            - This is presentation-only.
+            - This does not change check logic, console output, or TXT output.
+            - The sidebar link still points to this same raw-findings section.
+        -->
         <section id="raw-findings" class="card section">
-            <h2>Raw Findings</h2>
-            <pre>$RawFindings</pre>
+            <details class="technical-depth">
+                <summary>Raw Findings</summary>
+                <pre>$RawFindings</pre>
+            </details>
         </section>
         </main>
     </div>
