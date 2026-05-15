@@ -1,5 +1,5 @@
 # ArcForge First Response
-# ArcForge First Response Report v0.18
+# ArcForge First Response Report v0.20
 
 param (
     [ValidateSet("General", "Gaming", "Creator", "Developer", "Homelab", "Secure")]
@@ -877,6 +877,114 @@ $CardsHtml
 "@
     }
 
+    # Builds the compact v0.20 Endpoint Summary badge shown at the top of the
+    # HTML report.
+    #
+    # Why this exists:
+    # - The first screen of the HTML report should feel like a quick endpoint
+    #   identity card, similar to what a tech might scan in an RMM tool.
+    # - A tech should be able to immediately identify the computer, current user,
+    #   selected Battlestation Profile, generated time, overall status, and check
+    #   totals without reading a large grid of separate cards.
+    #
+    # Input:
+    # - Report metadata that was already being displayed in the Report Summary.
+    # - Existing OK/WARN/FAIL/Total counters and the existing OverallStatus value.
+    #
+    # Output:
+    # - A presentation-only HTML block inserted into the Report Summary section.
+    #
+    # Important:
+    # - This does not run checks.
+    # - This does not change scoring.
+    # - This does not change console output.
+    # - This does not change TXT report output.
+    #
+    # Troubleshooting rule:
+    # - If the top badge looks wrong, inspect the endpoint-summary CSS classes and
+    #   the values passed into this helper before changing health-check logic.
+    function New-ArcForgeEndpointSummaryHtml {
+        param (
+            [string]$ReportId,
+            [string]$ComputerName,
+            [string]$CurrentUser,
+            [string]$BattlestationProfile,
+            [datetime]$GeneratedAt,
+            [string]$OverallStatus,
+            [string]$StatusClass,
+            [int]$OkCount,
+            [int]$WarnCount,
+            [int]$FailCount,
+            [int]$TotalChecks
+        )
+
+        $SafeReportId = ConvertTo-HtmlSafeText $ReportId
+        $SafeComputerName = ConvertTo-HtmlSafeText $ComputerName
+        $SafeCurrentUser = ConvertTo-HtmlSafeText $CurrentUser
+        $SafeBattlestationProfile = ConvertTo-HtmlSafeText $BattlestationProfile
+        $SafeGeneratedAt = ConvertTo-HtmlSafeText $GeneratedAt
+        $SafeOverallStatus = ConvertTo-HtmlSafeText $OverallStatus
+
+        return @"
+        <section class="endpoint-summary card" aria-label="Endpoint Summary">
+            <div class="endpoint-main">
+                <div class="endpoint-identity">
+                    <div class="endpoint-kicker">Endpoint Summary</div>
+                    <div class="endpoint-title-row">
+                        <h2>$SafeComputerName</h2>
+                        <span class="endpoint-status-pill $StatusClass">$SafeOverallStatus</span>
+                    </div>
+                    <p class="endpoint-description">Static local triage snapshot for this workstation.</p>
+
+                    <div class="endpoint-meta-stack">
+                        <div class="endpoint-meta-item">
+                            <span class="endpoint-meta-label">Current User</span>
+                            <strong>$SafeCurrentUser</strong>
+                        </div>
+                        <div class="endpoint-meta-item">
+                            <span class="endpoint-meta-label">Battlestation Profile</span>
+                            <strong>$SafeBattlestationProfile</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="endpoint-status-panel">
+                    <div class="endpoint-status-heading">Check Totals</div>
+                    <div class="endpoint-count-strip" aria-label="ArcForge check result totals">
+                        <div class="endpoint-count endpoint-count-ok">
+                            <span class="endpoint-count-number">$OkCount</span>
+                            <span class="endpoint-count-label">OK</span>
+                        </div>
+                        <div class="endpoint-count endpoint-count-warn">
+                            <span class="endpoint-count-number">$WarnCount</span>
+                            <span class="endpoint-count-label">WARN</span>
+                        </div>
+                        <div class="endpoint-count endpoint-count-fail">
+                            <span class="endpoint-count-number">$FailCount</span>
+                            <span class="endpoint-count-label">FAIL</span>
+                        </div>
+                        <div class="endpoint-count endpoint-count-total">
+                            <span class="endpoint-count-number">$TotalChecks</span>
+                            <span class="endpoint-count-label">TOTAL</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="endpoint-bottom-row">
+                <div class="endpoint-meta-item">
+                    <span class="endpoint-meta-label">Report ID</span>
+                    <strong>$SafeReportId</strong>
+                </div>
+                <div class="endpoint-meta-item">
+                    <span class="endpoint-meta-label">Generated At</span>
+                    <strong>$SafeGeneratedAt</strong>
+                </div>
+            </div>
+        </section>
+"@
+    }
+
 
     # Assigns one WARN/FAIL finding to the triage bucket shown in Recommended Actions.
     #
@@ -1477,6 +1585,23 @@ $NavigationLinksHtml
         $StatusClass = "status-ok"
     }
 
+    # Build the v0.20 Endpoint Summary badge.
+    #
+    # This reuses the metadata and counts already calculated for the report. It is
+    # presentation-only and only affects the static HTML report's top summary area.
+    $EndpointSummaryHtml = New-ArcForgeEndpointSummaryHtml `
+        -ReportId $ReportId `
+        -ComputerName $ComputerName `
+        -CurrentUser $CurrentUser `
+        -BattlestationProfile $BattlestationProfile `
+        -GeneratedAt $GeneratedAt `
+        -OverallStatus $OverallStatus `
+        -StatusClass $StatusClass `
+        -OkCount $OkCount `
+        -WarnCount $WarnCount `
+        -FailCount $FailCount `
+        -TotalChecks $TotalChecks
+
     # Build the v0.17 Recommended Actions queue.
     #
     # Step 1: Convert raw WARN/FAIL report lines into simple action objects.
@@ -1522,7 +1647,7 @@ $NavigationLinksHtml
             padding: 32px;
             background: var(--bg);
             color: var(--text);
-            font-family: "Segoe UI", Arial, sans-serif;
+            font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
             line-height: 1.5;
         }
 
@@ -1754,6 +1879,196 @@ $NavigationLinksHtml
         .meta-value {
             font-weight: 650;
             word-break: break-word;
+        }
+
+        /* v0.20 Endpoint Summary / ID badge.
+           Why this exists:
+           - This compact top panel makes the first screen feel more like a
+             professional endpoint triage dashboard.
+           - It replaces the older spread-out metadata card grid with one
+             scannable asset-style summary.
+
+           Important:
+           - These styles affect the HTML report only.
+           - They do not affect health-check logic, console output, or TXT output.
+           - Keep this scoped to endpoint-* classes so later report sections are
+             not accidentally redesigned during this release. */
+        .endpoint-summary {
+            display: grid;
+            gap: 14px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+        }
+
+        .endpoint-identity {
+            min-width: 0;
+        }
+
+        .endpoint-main {
+            display: grid;
+            grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
+            gap: 18px;
+            align-items: stretch;
+        }
+
+        .endpoint-kicker {
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+
+        .endpoint-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+        }
+
+        .endpoint-title-row h2 {
+            margin: 0;
+            font-size: 24px;
+            line-height: 1.2;
+            word-break: break-word;
+        }
+
+        .endpoint-bottom-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
+            gap: 18px;
+        }
+
+        .endpoint-description {
+            margin: 0 0 16px 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .endpoint-status-pill {
+            border-radius: 999px;
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            padding: 7px 12px;
+            text-transform: uppercase;
+        }
+
+        .endpoint-status-pill.status-ok {
+            background: rgba(31, 143, 77, 0.12);
+            border: 1px solid rgba(31, 143, 77, 0.35);
+            color: var(--ok);
+        }
+
+        .endpoint-status-pill.status-warn {
+            background: rgba(183, 121, 31, 0.12);
+            border: 1px solid rgba(183, 121, 31, 0.35);
+            color: var(--warn);
+        }
+
+        .endpoint-status-pill.status-fail {
+            background: rgba(197, 48, 48, 0.12);
+            border: 1px solid rgba(197, 48, 48, 0.35);
+            color: var(--fail);
+        }
+
+        .endpoint-meta-stack {
+            display: grid;
+            gap: 10px;
+        }
+
+        .endpoint-meta-item {
+            background: #f8fafc;
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            border-radius: 10px;
+            padding: 10px 12px;
+            min-width: 0;
+        }
+
+        .endpoint-meta-label {
+            color: var(--muted);
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .endpoint-meta-item strong {
+            display: block;
+            font-size: 14px;
+            overflow-wrap: break-word;
+        }
+
+        .endpoint-status-panel {
+            background: #f8fafc;
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            border-radius: 10px;
+            padding: 14px;
+            display: grid;
+            align-content: center;
+            gap: 14px;
+        }
+
+        .endpoint-status-heading {
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .endpoint-count-strip {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .endpoint-count {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+        }
+
+        .endpoint-count-number {
+            display: block;
+            font-size: 24px;
+            font-weight: 800;
+            line-height: 1;
+            margin-bottom: 5px;
+        }
+
+        .endpoint-count-label {
+            color: var(--muted);
+            display: block;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+        }
+
+        .endpoint-count-ok .endpoint-count-number {
+            color: var(--ok);
+        }
+
+        .endpoint-count-warn .endpoint-count-number {
+            color: var(--warn);
+        }
+
+        .endpoint-count-fail .endpoint-count-number {
+            color: var(--fail);
+        }
+
+        .endpoint-count-total .endpoint-count-number {
+            color: var(--text);
         }
 
         .summary-counts {
@@ -2028,6 +2343,11 @@ $NavigationLinksHtml
                 position: static;
             }
 
+            .endpoint-main,
+            .endpoint-bottom-row {
+                grid-template-columns: 1fr;
+            }
+
             .grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
@@ -2038,7 +2358,8 @@ $NavigationLinksHtml
                 padding: 16px;
             }
 
-            .grid {
+            .grid,
+            .endpoint-count-strip {
                 grid-template-columns: 1fr;
             }
         }
@@ -2068,59 +2389,23 @@ $ReportNavigationHtml
 
              Contains:
              - report title/status header
+             - v0.20 Endpoint Summary badge
              - report ID
              - generated time
              - computer name
              - current user
              - Battlestation Profile
              - overall status
-             - total checks
-             - report type
+             - OK/WARN/FAIL/total check counts
              ============================================================ -->
         <section id="report-summary" class="report-summary">
         <header class="ticket-header">
             <div class="eyebrow">ArcForge First Response</div>
             <h1>First Response Report</h1>
             <div class="subtitle">Static triage record generated from local workstation readiness checks.</div>
-            <div class="status-row">
-                <span class="status-badge $StatusClass">$OverallStatus</span>
-            </div>
         </header>
 
-        <section class="grid">
-            <div class="card">
-                <div class="meta-label">Report ID</div>
-                <div class="meta-value">$(ConvertTo-HtmlSafeText $ReportId)</div>
-            </div>
-            <div class="card">
-                <div class="meta-label">Generated At</div>
-                <div class="meta-value">$(ConvertTo-HtmlSafeText $GeneratedAt)</div>
-            </div>
-            <div class="card">
-                <div class="meta-label">Computer</div>
-                <div class="meta-value">$(ConvertTo-HtmlSafeText $ComputerName)</div>
-            </div>
-            <div class="card">
-                <div class="meta-label">Current User</div>
-                <div class="meta-value">$(ConvertTo-HtmlSafeText $CurrentUser)</div>
-            </div>
-            <div class="card">
-                <div class="meta-label">Battlestation Profile</div>
-                <div class="meta-value">$(ConvertTo-HtmlSafeText $BattlestationProfile)</div>
-            </div>
-            <div class="card">
-                <div class="meta-label">Overall Status</div>
-                <div class="meta-value">$OverallStatus</div>
-            </div>
-            <div class="card">
-                <div class="meta-label">Total Checks</div>
-                <div class="meta-value">$TotalChecks</div>
-            </div>
-            <div class="card">
-                <div class="meta-label">Report Type</div>
-                <div class="meta-value">First Response Triage</div>
-            </div>
-        </section>
+$EndpointSummaryHtml
         </section>
         <!-- v0.18 REPORT SUMMARY MODULE END -->
 
