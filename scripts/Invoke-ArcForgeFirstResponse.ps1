@@ -1,5 +1,5 @@
 # ArcForge First Response
-# ArcForge First Response Report v0.22
+# ArcForge First Response Report v0.23
 
 param (
     [ValidateSet("General", "Gaming", "Creator", "Developer", "Homelab", "Secure")]
@@ -1276,7 +1276,7 @@ $CardsHtml
         return @($ActionItems)
     }
 
-    # Builds the grouped Recommended Actions triage panel.
+    # Builds the severity-first Recommended Actions triage panel.
     #
     # Why this exists:
     # - Get-ArcForgeActionItems prepares clean action objects.
@@ -1284,11 +1284,19 @@ $CardsHtml
     # - Separating data preparation from HTML generation makes future polishing
     #   easier without changing the report parsing logic.
     #
+    # v0.23 triage rule:
+    # - Recommended Actions should behave like a local triage queue.
+    # - FAIL items are shown first across the entire queue, regardless of category.
+    # - WARN items are shown after FAIL items.
+    # - The original category is still shown inside each card so the technician
+    #   knows which evidence section to review next.
+    #
     # Important:
     # - The output is static HTML only.
     # - No JavaScript is used.
     # - No external dependencies are used.
     # - This only changes the HTML Recommended Actions section.
+    # - This does not change readiness scoring, check logic, console output, or TXT output.
     #
     # Input:
     # - ActionItems: Objects returned by Get-ArcForgeActionItems.
@@ -1313,36 +1321,45 @@ $CardsHtml
 "@
         }
 
-        # Controls the order of groups in the HTML report.
-        #
-        # The order is intentionally not alphabetical. It follows a practical
-        # triage flow: local stability, network, profile tools, security, updates,
-        # then anything uncategorized.
-        $CategoryOrder = @(
-            "System Stability",
-            "Network Connectivity",
-            "Profile Readiness",
-            "Security Review",
-            "Update Readiness",
-            "General Findings"
+        # Build summary counts for the small triage strip at the top of the section.
+        # These counts are presentation-only. They summarize the action objects that
+        # already exist; they do not change any health-check result or score.
+        $TotalActionCount = @($ActionItems).Count
+        $FailActionCount = @($ActionItems | Where-Object { $_.Severity -eq "FAIL" }).Count
+        $WarnActionCount = @($ActionItems | Where-Object { $_.Severity -eq "WARN" }).Count
+
+        # Describes the severity-first queue sections in the order they should be
+        # displayed. This is what makes FAIL appear before WARN globally instead of
+        # hiding a FAIL item underneath earlier category groups.
+        $PriorityGroups = @(
+            [pscustomobject]@{
+                Severity = "FAIL"
+                Heading  = "Failed Actions"
+                Summary  = "Issues that indicate an expected check failed and should be reviewed first."
+            },
+            [pscustomobject]@{
+                Severity = "WARN"
+                Heading  = "Warnings"
+                Summary  = "Items that need attention, confirmation, or follow-up review."
+            }
         )
 
         $GroupBlocks = @()
 
-        foreach ($Category in $CategoryOrder) {
-            # Pull only the items for the current category.
+        foreach ($PriorityGroup in $PriorityGroups) {
+            # Pull only the action items matching the current severity.
             # Wrapping the result in @() makes .Count reliable even if there is
             # only one matching item.
-            $CategoryItems = @($ActionItems | Where-Object { $_.Category -eq $Category })
+            $SeverityItems = @($ActionItems | Where-Object { $_.Severity -eq $PriorityGroup.Severity })
 
-            # Skip empty categories so the report only shows useful groups.
-            if (-not $CategoryItems -or $CategoryItems.Count -eq 0) {
+            # Skip empty severity groups so the report only shows useful queues.
+            if (-not $SeverityItems -or $SeverityItems.Count -eq 0) {
                 continue
             }
 
             $ItemBlocks = @()
 
-            foreach ($Item in $CategoryItems) {
+            foreach ($Item in $SeverityItems) {
                 # Build a CSS class from the severity, such as action-warn or
                 # action-fail. ToLowerInvariant avoids locale-specific casing.
                 $SeverityClass = "action-$($Item.Severity.ToLowerInvariant())"
@@ -1352,6 +1369,7 @@ $CardsHtml
                 # <, >, &, quotes, or other markup-looking text.
                 $SafeSeverity = ConvertTo-HtmlSafeText $Item.Severity
                 $SafeTitle = ConvertTo-HtmlSafeText $Item.Title
+                $SafeCategory = ConvertTo-HtmlSafeText $Item.Category
                 $SafeDetail = ConvertTo-HtmlSafeText $Item.Detail
                 $SafeSuggestedAction = ConvertTo-HtmlSafeText $Item.SuggestedAction
 
@@ -1365,25 +1383,41 @@ $CardsHtml
 
                 # This is the individual ticket-style action card.
                 # The severity badge and left border provide quick visual context.
+                # The category label preserves the original evidence domain even
+                # though the overall queue is now sorted by severity first.
                 $ItemBlocks += @"
                     <article class="action-item $SeverityClass">
                         <div class="action-header">
                             <span class="action-severity">$SafeSeverity</span>
                             <strong>$SafeTitle</strong>
                         </div>
+                        <div class="action-meta">Category: $SafeCategory</div>
                         $DetailHtml
-                        <p class="action-suggestion"><strong>Suggested Action:</strong> $SafeSuggestedAction</p>
+                        <div class="action-suggestion">
+                            <span class="action-label">Suggested Action</span>
+                            <p>$SafeSuggestedAction</p>
+                        </div>
                     </article>
 "@
             }
 
-            $SafeCategory = ConvertTo-HtmlSafeText $Category
+            $SafeHeading = ConvertTo-HtmlSafeText $PriorityGroup.Heading
+            $SafeSummary = ConvertTo-HtmlSafeText $PriorityGroup.Summary
+            $SafeCount = ConvertTo-HtmlSafeText "$($SeverityItems.Count) action(s)"
             $ItemsHtml = $ItemBlocks -join "`n"
 
-            # This is the group wrapper, such as System Stability or Security Review.
+            # This is the severity wrapper, such as Failed Actions or Warnings.
+            # The header count makes the queue easier to scan without changing the
+            # underlying action data.
             $GroupBlocks += @"
-                <div class="action-group">
-                    <h3>$SafeCategory</h3>
+                <div class="action-group action-priority-group">
+                    <div class="action-group-header">
+                        <div>
+                            <h3>$SafeHeading</h3>
+                            <p>$SafeSummary</p>
+                        </div>
+                        <span class="action-group-count">$SafeCount</span>
+                    </div>
 $ItemsHtml
                 </div>
 "@
@@ -1396,7 +1430,12 @@ $ItemsHtml
         <section id="recommended-actions" class="card section">
             <div class="section-title">
                 <h2>Recommended Actions</h2>
-                <p>Grouped WARN/FAIL findings prioritized as a local triage queue.</p>
+                <p>Grouped findings that need attention, prioritized for local triage.</p>
+            </div>
+            <div class="action-summary-strip" aria-label="Recommended Actions summary">
+                <span class="action-summary-chip"><strong>$TotalActionCount</strong> Action Item(s)</span>
+                <span class="action-summary-chip action-summary-fail"><strong>$FailActionCount</strong> FAIL</span>
+                <span class="action-summary-chip action-summary-warn"><strong>$WarnActionCount</strong> WARN</span>
             </div>
             <div class="action-queue">
 $GroupsHtml
@@ -2317,9 +2356,46 @@ $NavigationLinksHtml
             color: var(--muted);
         }
 
-        /* v0.17 Recommended Actions queue styles.
+        /* v0.17/v0.23 Recommended Actions queue styles.
            These classes only affect the HTML report. They do not affect console
-           output, TXT reports, or the health-check logic. */
+           output, TXT reports, or the health-check logic.
+
+           v0.23 note:
+           - The queue is now severity-first so FAIL actions appear above WARN actions.
+           - Category context still appears inside each card as a small metadata line. */
+
+        /* Compact summary strip shown above the action queue. */
+        .action-summary-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 14px 0 18px 0;
+        }
+
+        /* Small count pills for total actions, FAIL actions, and WARN actions. */
+        .action-summary-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: var(--chip);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            color: var(--muted);
+            font-size: 12px;
+            padding: 7px 10px;
+        }
+
+        .action-summary-chip strong {
+            color: #0f172a;
+        }
+
+        .action-summary-fail strong {
+            color: var(--fail);
+        }
+
+        .action-summary-warn strong {
+            color: var(--warn);
+        }
 
         /* Overall container for all action groups. Grid gives us even spacing
            between groups without needing JavaScript or external CSS. */
@@ -2328,7 +2404,7 @@ $NavigationLinksHtml
             gap: 16px;
         }
 
-        /* One group box, such as System Stability or Network Connectivity. */
+        /* One severity group box, such as Failed Actions or Warnings. */
         .action-group {
             border: 1px solid var(--border);
             border-radius: 14px;
@@ -2336,10 +2412,37 @@ $NavigationLinksHtml
             padding: 16px;
         }
 
-        /* Category heading inside each action group. */
+        /* Header row for each severity group. */
+        .action-group-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 14px;
+            margin-bottom: 12px;
+        }
+
+        /* Severity group heading. */
         .action-group h3 {
-            margin: 0 0 12px 0;
+            margin: 0;
             font-size: 15px;
+        }
+
+        /* Short explanation under each severity group heading. */
+        .action-group-header p {
+            margin: 5px 0 0 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        /* Small count pill shown in each severity group header. */
+        .action-group-count {
+            flex: 0 0 auto;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            color: var(--muted);
+            font-size: 12px;
+            padding: 5px 10px;
         }
 
         /* One individual ticket-style action item. The left border is neutral by
@@ -2393,12 +2496,39 @@ $NavigationLinksHtml
             color: var(--fail);
         }
 
-        /* Optional detail text and suggested-action text under each action item. */
-        .action-detail,
-        .action-suggestion {
-            margin: 9px 0 0 0;
+        /* Small category metadata line inside each action card. */
+        .action-meta {
+            color: var(--muted);
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
+        /* Optional detail text under each action item. */
+        .action-detail {
+            margin: 8px 0 0 0;
             color: var(--muted);
             font-size: 13px;
+        }
+
+        /* Suggested action block under each action item. */
+        .action-suggestion {
+            margin-top: 10px;
+        }
+
+        .action-suggestion p {
+            margin: 4px 0 0 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        /* Small label that separates the action instruction from the finding title. */
+        .action-label {
+            color: #0f172a;
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
         }
 
         ul {
